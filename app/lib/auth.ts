@@ -26,7 +26,8 @@ type SessionRow = UserRow & {
 
 const SESSION_COOKIE = "eduassist_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
-const PASSWORD_ITERATIONS = 120_000;
+// Cloudflare Workers Web Crypto currently caps PBKDF2 at 100,000 rounds.
+const PASSWORD_ITERATIONS = 100_000;
 const encoder = new TextEncoder();
 let schemaPromise: Promise<void> | null = null;
 
@@ -93,9 +94,15 @@ async function initializeAuthSchema() {
   for (const account of demoAccounts) {
     const passwordHash = await derivePassword(account.password, account.salt);
     await db
-      .prepare(`INSERT OR IGNORE INTO auth_users
+      .prepare(`INSERT INTO auth_users
         (user_id, display_name, role, password_salt, password_hash)
-        VALUES (?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          display_name = excluded.display_name,
+          role = excluded.role,
+          password_salt = excluded.password_salt,
+          password_hash = excluded.password_hash,
+          updated_at = CURRENT_TIMESTAMP`)
       .bind(
         account.userId,
         account.displayName,
