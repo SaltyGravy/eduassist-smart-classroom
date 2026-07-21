@@ -1,14 +1,17 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AdminPanel } from "./AdminPanel";
 
 type Role = "faculty" | "student";
+type AccountRole = "admin" | Role;
 type AuthUser = {
   userId: string;
   displayName: string;
-  role: Role;
+  role: AccountRole;
   deviceLabel: string;
   deviceRegisteredAt: string;
+  mustChangePassword: boolean;
 };
 
 type LoginResult = {
@@ -202,19 +205,19 @@ function LoginScreen({
   notice: string;
   onAuthenticated: (result: LoginResult) => void;
 }) {
-  const [role, setRole] = useState<Role>("faculty");
-  const [userId, setUserId] = useState("FAC001");
-  const [password, setPassword] = useState("Faculty@123");
+  const [role, setRole] = useState<AccountRole>("admin");
+  const [userId, setUserId] = useState("ADM001");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [deviceBlocked, setDeviceBlocked] = useState(false);
   const deviceLabel = useMemo(() => describeCurrentDevice(), []);
 
-  function chooseRole(nextRole: Role) {
+  function chooseRole(nextRole: AccountRole) {
     setRole(nextRole);
-    setUserId(nextRole === "faculty" ? "FAC001" : "STU001");
-    setPassword(nextRole === "faculty" ? "Faculty@123" : "Student@123");
+    setUserId(nextRole === "admin" ? "ADM001" : "");
+    setPassword("");
     setError("");
     setDeviceBlocked(false);
   }
@@ -251,9 +254,9 @@ function LoginScreen({
         <div className="login-story-copy">
           <span className="eyebrow light">PERSONAL COLLEGE PROJECT</span>
           <h1>One classroom.<br />One trusted device.</h1>
-          <p>Explore a secure faculty and student workspace without needing access to your college systems.</p>
+          <p>Run a secure faculty and student workspace with an administrator account you control.</p>
           <div className="security-points">
-            <div><span>01</span><p><b>Role-based access</b>Faculty and students enter separate workspaces with their own credentials.</p></div>
+            <div><span>01</span><p><b>Self-managed access</b>Create faculty and student accounts from your administrator workspace.</p></div>
             <div><span>02</span><p><b>First-login registration</b>The first successful login binds the account to this browser installation.</p></div>
             <div><span>03</span><p><b>Controlled device change</b>Release the old device before registering a new one, inspired by UTS handset binding.</p></div>
           </div>
@@ -272,12 +275,13 @@ function LoginScreen({
             <fieldset className="login-role-picker">
               <legend>Choose workspace</legend>
               <div>
+                <button type="button" className={role === "admin" ? "active" : ""} onClick={() => chooseRole("admin")}><span>⚙</span><b>Admin</b><small>Control access</small></button>
                 <button type="button" className={role === "faculty" ? "active" : ""} onClick={() => chooseRole("faculty")}><span>♙</span><b>Faculty</b><small>Manage classes</small></button>
                 <button type="button" className={role === "student" ? "active" : ""} onClick={() => chooseRole("student")}><span>▤</span><b>Student</b><small>Learn & respond</small></button>
               </div>
             </fieldset>
 
-            <label className="auth-field"><span>User ID</span><div><i>⌁</i><input value={userId} onChange={(event) => setUserId(event.target.value.toUpperCase())} autoComplete="username" required placeholder={role === "faculty" ? "FAC001" : "STU001"} /></div></label>
+            <label className="auth-field"><span>User ID</span><div><i>⌁</i><input value={userId} onChange={(event) => setUserId(event.target.value.toUpperCase())} autoComplete="username" required placeholder={role === "admin" ? "ADM001" : role === "faculty" ? "FAC001" : "STU001"} /></div></label>
             <label className="auth-field"><span>Password</span><div><i>•</i><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? "Hide" : "Show"}</button></div></label>
 
             <div className="device-registration-preview"><span className="device-preview-icon">▣</span><div><b>This device will be verified</b><p>{deviceLabel}</p><small>A secure installation ID is used—never your IMEI or personal files.</small></div><i className="device-ready">READY</i></div>
@@ -285,14 +289,82 @@ function LoginScreen({
             <button className="button primary auth-submit" type="submit" disabled={submitting || !deviceId}>{submitting ? "Verifying device…" : "Login securely"}<span>→</span></button>
           </form>
 
-          <div className="demo-credentials">
-            <div><span className="eyebrow">DEMO ACCOUNTS</span><p>Use these credentials for your personal presentation.</p></div>
-            <button type="button" onClick={() => chooseRole("faculty")}><span className="credential-role faculty">F</span><p><b>FAC001</b><small>Faculty@123</small></p><i>Use</i></button>
-            <button type="button" onClick={() => chooseRole("student")}><span className="credential-role student">S</span><p><b>STU001</b><small>Student@123</small></p><i>Use</i></button>
-          </div>
+          <div className="account-issued-note"><span>⌾</span><p><b>Accounts are issued by your administrator.</b><br />Use the user ID and temporary password shared with you. You will create a private password on first login.</p></div>
 
           <p className="auth-disclaimer">Web browsers cannot safely expose hardware IMEI values. This model uses a privacy-safe browser installation ID; a future native Android/iOS app can add device attestation.</p>
         </div>
+      </section>
+    </main>
+  );
+}
+
+function PasswordChangeScreen({
+  user,
+  deviceId,
+  onChanged,
+  onSignOut,
+}: {
+  user: AuthUser;
+  deviceId: string;
+  onChanged: (user: AuthUser) => void;
+  onSignOut: () => Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const checks = [
+    { label: "At least 8 characters", passed: password.length >= 8 },
+    { label: "Uppercase and lowercase letters", passed: /[A-Z]/.test(password) && /[a-z]/.test(password) },
+    { label: "A number and a symbol", passed: /\d/.test(password) && /[^A-Za-z0-9]/.test(password) },
+  ];
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password !== confirmation) {
+      setError("The passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-eduassist-device-id": deviceId },
+        body: JSON.stringify({ newPassword: password }),
+      });
+      const result = (await response.json()) as { user?: AuthUser; message?: string };
+      if (!response.ok || !result.user) {
+        setError(result.message ?? "Your password could not be changed.");
+        return;
+      }
+      onChanged(result.user);
+    } catch {
+      setError("EduAssist could not reach the secure login service. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="password-setup-shell">
+      <section className="password-setup-card">
+        <div className="password-setup-brand"><span className="brand-mark"><i /><i /><i /></span><b>Edu<span>Assist</span></b></div>
+        <div className="setup-progress"><i className="done" /><span /><i className="active" /><span /><i /></div>
+        <span className="eyebrow">FIRST LOGIN · STEP 2 OF 3</span>
+        <h1>Create your private password</h1>
+        <p className="setup-lead">Welcome, {user.displayName}. Your device is now registered. Replace the temporary password before opening your {user.role} workspace.</p>
+        <div className="setup-device-card"><span>✓</span><div><b>Device registered successfully</b><p>{user.deviceLabel}</p></div></div>
+        {error ? <div className="auth-message error"><span>!</span><div><b>Password not changed</b><p>{error}</p></div></div> : null}
+        <form className="password-setup-form" onSubmit={changePassword}>
+          <label className="auth-field"><span>New password</span><div><i>•</i><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required autoFocus /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? "Hide" : "Show"}</button></div></label>
+          <label className="auth-field"><span>Confirm password</span><div><i>✓</i><input type={showPassword ? "text" : "password"} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" required /></div></label>
+          <div className="password-checks">{checks.map((check) => <span className={check.passed ? "passed" : ""} key={check.label}><i>{check.passed ? "✓" : "○"}</i>{check.label}</span>)}</div>
+          <button className="button primary auth-submit" type="submit" disabled={submitting || !checks.every((check) => check.passed) || password !== confirmation}>{submitting ? "Securing account…" : "Save password & continue"}<span>→</span></button>
+        </form>
+        <button className="setup-signout" onClick={() => void onSignOut()}>Sign out and finish later</button>
       </section>
     </main>
   );
@@ -308,18 +380,22 @@ export function ClassroomApp() {
   const [authNotice, setAuthNotice] = useState("");
 
   useEffect(() => {
-    const currentDeviceId = getOrCreateDeviceId();
-    setDeviceId(currentDeviceId);
-    fetch("/api/auth/session", {
-      cache: "no-store",
-      headers: { "x-eduassist-device-id": currentDeviceId },
-    })
-      .then(async (response) => {
+    async function initializeSession() {
+      const currentDeviceId = getOrCreateDeviceId();
+      setDeviceId(currentDeviceId);
+      try {
+        const response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          headers: { "x-eduassist-device-id": currentDeviceId },
+        });
         if (!response.ok) throw new Error("No active session");
-        return (await response.json()) as { user: AuthUser };
-      })
-      .then(({ user }) => setAuthState({ status: "authenticated", user }))
-      .catch(() => setAuthState({ status: "guest" }));
+        const { user } = (await response.json()) as { user: AuthUser };
+        setAuthState({ status: "authenticated", user });
+      } catch {
+        setAuthState({ status: "guest" });
+      }
+    }
+    void initializeSession();
   }, []);
 
   async function signOut() {
@@ -355,10 +431,17 @@ export function ClassroomApp() {
     );
   }
 
+  if (authState.user.mustChangePassword) {
+    return <PasswordChangeScreen user={authState.user} deviceId={deviceId} onChanged={(user) => setAuthState({ status: "authenticated", user })} onSignOut={signOut} />;
+  }
+
+  if (authState.user.role === "admin") {
+    return <AdminPanel user={authState.user as AuthUser & { role: "admin" }} deviceId={deviceId} onSignOut={signOut} onReleaseDevice={releaseDevice} />;
+  }
+
   return (
     <AuthenticatedClassroom
-      user={authState.user}
-      deviceId={deviceId}
+      user={authState.user as AuthUser & { role: Role }}
       onSignOut={signOut}
       onReleaseDevice={releaseDevice}
     />
@@ -367,12 +450,10 @@ export function ClassroomApp() {
 
 function AuthenticatedClassroom({
   user,
-  deviceId,
   onSignOut,
   onReleaseDevice,
 }: {
-  user: AuthUser;
-  deviceId: string;
+  user: AuthUser & { role: Role };
   onSignOut: () => Promise<void>;
   onReleaseDevice: () => Promise<void>;
 }) {
@@ -404,16 +485,17 @@ function AuthenticatedClassroom({
 
   useEffect(() => {
     if (!activeSession || countdown <= 0) return;
-    const timer = window.setInterval(() => setCountdown((current) => current - 1), 1000);
-    return () => window.clearInterval(timer);
+    const timer = window.setTimeout(() => {
+      if (countdown <= 1) {
+        setCountdown(0);
+        setActiveSession(false);
+        setToast("Attendance session expired safely.");
+      } else {
+        setCountdown(countdown - 1);
+      }
+    }, 1000);
+    return () => window.clearTimeout(timer);
   }, [activeSession, countdown]);
-
-  useEffect(() => {
-    if (countdown === 0) {
-      setActiveSession(false);
-      setToast("Attendance session expired safely.");
-    }
-  }, [countdown]);
 
   const filteredClasses = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -479,23 +561,6 @@ function AuthenticatedClassroom({
     );
     setQuizResult(correct);
     setToast(`Quiz submitted — ${correct}/${quizQuestions.length} correct.`);
-  }
-
-  async function resetStudentDevice(userId: string) {
-    const response = await fetch("/api/auth/faculty-reset-device", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-eduassist-device-id": deviceId,
-      },
-      body: JSON.stringify({ userId }),
-    });
-    const result = (await response.json()) as { displayName?: string; message?: string };
-    setToast(
-      response.ok
-        ? `${result.displayName ?? userId}'s registered device was released.`
-        : result.message ?? "The device could not be reset.",
-    );
   }
 
   const pageTitle = nav.find((item) => item.id === view)?.label || "Overview";
@@ -651,7 +716,7 @@ function AuthenticatedClassroom({
               }}
             />
           ) : null}
-          {view === "students" ? <StudentsView onResetDevice={resetStudentDevice} /> : null}
+          {view === "students" ? <StudentsView /> : null}
           {view === "analytics" ? <AnalyticsView role={role} /> : null}
         </div>
       </main>
@@ -920,9 +985,9 @@ function QuizzesView({ role, published, answers, result, onAnswer, onSubmit, onG
   );
 }
 
-function StudentsView({ onResetDevice }: { onResetDevice: (userId: string) => void }) {
+function StudentsView() {
   return (
-    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">CS301 · SECTION A</span><h2>Student roster</h2><p>Track attendance, performance, and registered student devices.</p></div><button className="button primary">＋ Add student</button></div><div className="panel data-panel"><div className="table-toolbar"><div className="mini-search">⌕ <input placeholder="Search student or roll number" /></div><button className="button outline">Export CSV ↓</button></div><div className="student-table"><div className="table-row table-head"><span>Student</span><span>Roll number</span><span>Attendance</span><span>Quiz average</span><span>Status</span><span>Device</span></div>{students.map((student, index) => { const deviceUserId = index === 0 ? "STU001" : index === 1 ? "STU002" : null; return <div className="table-row" key={student[1]}><span className="student-cell"><i className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</i><b>{student[0]}</b></span><span>{student[1]}</span><span><b>{student[2]}</b></span><span><b>{student[3]}%</b></span><span><i className={Number.parseInt(student[2]) > 85 ? "status-dot good" : "status-dot watch"} />{Number.parseInt(student[2]) > 85 ? "On track" : "Needs attention"}</span>{deviceUserId ? <button className="device-reset-button" onClick={() => onResetDevice(deviceUserId)}>Release</button> : <span className="device-unmanaged">Not linked</span>}</div>; })}</div></div></section>
+    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">CS301 · SECTION A</span><h2>Student roster</h2><p>Track attendance and learning performance. Account recovery is restricted to the administrator.</p></div><button className="button primary">＋ Add student</button></div><div className="panel data-panel"><div className="table-toolbar"><div className="mini-search">⌕ <input placeholder="Search student or roll number" /></div><button className="button outline">Export CSV ↓</button></div><div className="student-table"><div className="table-row table-head"><span>Student</span><span>Roll number</span><span>Attendance</span><span>Quiz average</span><span>Status</span><span /></div>{students.map((student, index) => <div className="table-row" key={student[1]}><span className="student-cell"><i className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</i><b>{student[0]}</b></span><span>{student[1]}</span><span><b>{student[2]}</b></span><span><b>{student[3]}%</b></span><span><i className={Number.parseInt(student[2]) > 85 ? "status-dot good" : "status-dot watch"} />{Number.parseInt(student[2]) > 85 ? "On track" : "Needs attention"}</span><button className="table-more" aria-label={`More options for ${student[0]}`}>•••</button></div>)}</div></div></section>
   );
 }
 

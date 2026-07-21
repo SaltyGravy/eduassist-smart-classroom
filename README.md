@@ -1,9 +1,9 @@
 # EduAssist
 
-EduAssist is an interactive smart-classroom workspace for faculty and students.
-It brings device-registered access, attendance, AI-assisted study materials,
-quiz generation, class management, and learning analytics into one calm,
-responsive interface.
+EduAssist is an interactive smart-classroom workspace with separate administrator,
+faculty, and student experiences. It brings account administration,
+device-registered access, attendance, AI-assisted study materials, quiz generation,
+class management, and learning analytics into one calm, responsive interface.
 
 ## Prerequisites
 
@@ -16,26 +16,28 @@ pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and use the role switcher in
-the secure login screen to explore both workspaces.
+Open [http://localhost:3000](http://localhost:3000) and use the role switcher on
+the secure login screen. The one-time administrator credential is provided during
+deployment handoff and is never displayed on the public login page.
 
-### Demo credentials
+## Administrator onboarding
 
-| Role | User ID | Password |
-| --- | --- | --- |
-| Faculty | `FAC001` | `Faculty@123` |
-| Student | `STU001` | `Student@123` |
+1. Sign in to the **Admin** workspace with the bootstrap account.
+2. The first login binds the account to that browser.
+3. Replace the temporary password before the dashboard opens.
+4. Create faculty and student accounts and share their temporary credentials privately.
 
-The first successful login registers that account to the current browser
-installation. Use **Release this device** from the account menu before moving
-the account to another browser. Faculty can also release a demo student's device
-from the student roster.
+The first successful login for every account registers it to the current browser
+installation. Users can release their own device from their account menu. Only the
+administrator can release somebody else's device for recovery.
 
 ## Included workflows
 
 - Faculty overview with schedules, metrics, quick actions, and engagement trends
-- Password-hashed faculty/student accounts with seven-day sessions
-- One-device account binding with controlled device release
+- Administrator dashboard for account creation, suspension, password reset, and recovery
+- PBKDF2 password hashing, forced first-login password changes, and seven-day sessions
+- One-device account binding with second-device blocking and controlled release
+- Read-only audit history for login, device, password, and account actions
 - Four-minute QR-style attendance sessions with a live roster
 - Study-material upload flow with generated summary cards
 - Quiz generation, review, publishing, student attempts, and scoring
