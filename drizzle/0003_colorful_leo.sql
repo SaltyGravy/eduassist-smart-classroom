@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `attendance_sessions_active_unique` ON `attendance_sessions` (`class_id`) WHERE "attendance_sessions"."status" = 'active';

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AdminPanel } from "./AdminPanel";
+import { LiveAttendanceView, LiveClassesView, LiveReportsView, LiveRosterView, type LiveClass } from "./ClassroomModules";
 
 type Role = "faculty" | "student";
 type AccountRole = "admin" | Role;
@@ -27,59 +28,23 @@ type View =
   | "students"
   | "analytics";
 
-type ClassItem = {
-  code: string;
-  name: string;
-  section: string;
-  students: number;
-  accent: string;
-  next: string;
-};
-
 const facultyNav: { id: View; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "⌂" },
   { id: "classes", label: "My Classes", icon: "▣" },
   { id: "attendance", label: "Attendance", icon: "◷" },
-  { id: "materials", label: "Study Materials", icon: "▤" },
-  { id: "quizzes", label: "Quizzes", icon: "◇" },
+  { id: "materials", label: "Notes · Later", icon: "▤" },
+  { id: "quizzes", label: "Quizzes · Later", icon: "◇" },
   { id: "students", label: "Students", icon: "♙" },
-  { id: "analytics", label: "Analytics", icon: "↗" },
+  { id: "analytics", label: "Reports", icon: "↗" },
 ];
 
 const studentNav: { id: View; label: string; icon: string }[] = [
   { id: "overview", label: "My Overview", icon: "⌂" },
   { id: "classes", label: "My Classes", icon: "▣" },
   { id: "attendance", label: "Attendance", icon: "◷" },
-  { id: "materials", label: "Study Materials", icon: "▤" },
-  { id: "quizzes", label: "Quizzes", icon: "◇" },
-  { id: "analytics", label: "My Results", icon: "↗" },
-];
-
-const starterClasses: ClassItem[] = [
-  {
-    code: "CS301",
-    name: "Artificial Intelligence",
-    section: "Semester 5 · Section A",
-    students: 42,
-    accent: "navy",
-    next: "Today, 11:30 AM",
-  },
-  {
-    code: "CS305",
-    name: "Machine Learning",
-    section: "Semester 5 · Section B",
-    students: 38,
-    accent: "mint",
-    next: "Tomorrow, 9:00 AM",
-  },
-  {
-    code: "CS212",
-    name: "Data Structures",
-    section: "Semester 3 · Section A",
-    students: 46,
-    accent: "yellow",
-    next: "Wed, 2:00 PM",
-  },
+  { id: "materials", label: "Notes · Later", icon: "▤" },
+  { id: "quizzes", label: "Quizzes · Later", icon: "◇" },
+  { id: "analytics", label: "My Reports", icon: "↗" },
 ];
 
 const quizQuestions = [
@@ -101,43 +66,11 @@ const quizQuestions = [
 ];
 
 const activity = [
-  { icon: "✓", tone: "mint", title: "Attendance completed", detail: "AI · Semester 5A", time: "10 min ago" },
-  { icon: "▤", tone: "blue", title: "Notes summary generated", detail: "Intelligent Agents.pdf", time: "1 hr ago" },
-  { icon: "◇", tone: "yellow", title: "Quiz published", detail: "Search Strategies · 10 questions", time: "Yesterday" },
+  { icon: "✓", tone: "mint", title: "Database-backed attendance", detail: "Expiry and duplicate protection enabled", time: "Ready" },
+  { icon: "▣", tone: "blue", title: "Class enrolment active", detail: "Faculty and student class codes", time: "Ready" },
+  { icon: "↗", tone: "yellow", title: "Verified reporting", detail: "Student history and CSV exports", time: "Ready" },
 ];
 
-const students = [
-  ["Aarav Sharma", "22CS001", "94%", "88"],
-  ["Diya Patel", "22CS008", "91%", "92"],
-  ["Kabir Mehta", "22CS019", "87%", "76"],
-  ["Meera Nair", "22CS024", "96%", "95"],
-  ["Rohan Verma", "22CS036", "82%", "71"],
-];
-
-function formatTime(seconds: number) {
-  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
-  const remaining = (seconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${remaining}`;
-}
-
-function makeQrCells() {
-  const cells: boolean[] = [];
-  for (let y = 0; y < 21; y += 1) {
-    for (let x = 0; x < 21; x += 1) {
-      const inFinder =
-        (x < 7 && y < 7) ||
-        (x > 13 && y < 7) ||
-        (x < 7 && y > 13);
-      const finderOn =
-        (x % 7 === 0 || x % 7 === 6 || y % 7 === 0 || y % 7 === 6) ||
-        (x % 7 >= 2 && x % 7 <= 4 && y % 7 >= 2 && y % 7 <= 4);
-      cells.push(inFinder ? finderOn : ((x * 3 + y * 5 + x * y) % 7 < 3));
-    }
-  }
-  return cells;
-}
-
-const qrCells = makeQrCells();
 
 function getOrCreateDeviceId() {
   const storageKey = "eduassist-device-registration";
@@ -442,6 +375,7 @@ export function ClassroomApp() {
   return (
     <AuthenticatedClassroom
       user={authState.user as AuthUser & { role: Role }}
+      deviceId={deviceId}
       onSignOut={signOut}
       onReleaseDevice={releaseDevice}
     />
@@ -450,22 +384,22 @@ export function ClassroomApp() {
 
 function AuthenticatedClassroom({
   user,
+  deviceId,
   onSignOut,
   onReleaseDevice,
 }: {
   user: AuthUser & { role: Role };
+  deviceId: string;
   onSignOut: () => Promise<void>;
   onReleaseDevice: () => Promise<void>;
 }) {
   const role = user.role;
   const [view, setView] = useState<View>("overview");
-  const [classes, setClasses] = useState<ClassItem[]>(starterClasses);
+  const [classes, setClasses] = useState<LiveClass[]>([]);
+  const [classesLoading, setClassesLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [toast, setToast] = useState("");
-  const [activeSession, setActiveSession] = useState(false);
-  const [countdown, setCountdown] = useState(240);
-  const [studentPresent, setStudentPresent] = useState(false);
   const [uploadedFile, setUploadedFile] = useState("");
   const [summaryReady, setSummaryReady] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -476,6 +410,7 @@ function AuthenticatedClassroom({
   const [showProfile, setShowProfile] = useState(false);
 
   const nav = role === "faculty" ? facultyNav : studentNav;
+  const mobileNav = nav.filter((item) => ["overview", "classes", "attendance", "students", "analytics"].includes(item.id));
 
   useEffect(() => {
     if (!toast) return;
@@ -483,24 +418,28 @@ function AuthenticatedClassroom({
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  async function refreshClasses() {
+    try {
+      const response = await fetch("/api/classroom/classes", { cache: "no-store", headers: { "x-eduassist-device-id": deviceId } });
+      if (!response.ok) throw new Error("Classes could not be loaded.");
+      const result = (await response.json()) as { classes: LiveClass[] };
+      setClasses(result.classes);
+    } catch {
+      setToast("Classes could not be loaded. Please refresh and try again.");
+    } finally {
+      setClassesLoading(false);
+    }
+  }
+
   useEffect(() => {
-    if (!activeSession || countdown <= 0) return;
-    const timer = window.setTimeout(() => {
-      if (countdown <= 1) {
-        setCountdown(0);
-        setActiveSession(false);
-        setToast("Attendance session expired safely.");
-      } else {
-        setCountdown(countdown - 1);
-      }
-    }, 1000);
+    const timer = window.setTimeout(() => { void refreshClasses(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeSession, countdown]);
+  }, [deviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredClasses = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return classes;
-    return classes.filter((item) => `${item.code} ${item.name} ${item.section}`.toLowerCase().includes(query));
+    return classes.filter((item) => `${item.subjectCode} ${item.subjectName} ${item.semester} ${item.section} ${item.classCode}`.toLowerCase().includes(query));
   }, [classes, search]);
 
   function navigate(nextView: View) {
@@ -508,40 +447,24 @@ function AuthenticatedClassroom({
     setSearch("");
   }
 
-  function createClass(event: FormEvent<HTMLFormElement>) {
+  async function createClass(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const subject = String(data.get("subject") || "New Class");
-    const code = String(data.get("code") || "NEW101").toUpperCase();
-    const semester = String(data.get("semester") || "Semester 1");
-    const section = String(data.get("section") || "A").toUpperCase();
-    setClasses((current) => [
-      ...current,
-      {
-        code,
-        name: subject,
-        section: `${semester} · Section ${section}`,
-        students: 0,
-        accent: "coral",
-        next: "Schedule pending",
-      },
-    ]);
-    setShowCreate(false);
-    setView("classes");
-    setToast(`${subject} created. Class code: ${code}-${section}`);
-  }
-
-  function startSession() {
-    setActiveSession(true);
-    setCountdown(240);
-    setStudentPresent(false);
-    setView("attendance");
-    setToast("Secure QR session started for CS301.");
-  }
-
-  function closeSession() {
-    setActiveSession(false);
-    setToast("Attendance saved: 39 present, 3 absent.");
+    const subjectName = String(data.get("subject") || "");
+    const subjectCode = String(data.get("code") || "").toUpperCase();
+    const semester = String(data.get("semester") || "");
+    const section = String(data.get("section") || "").toUpperCase();
+    try {
+      const response = await fetch("/api/classroom/classes", { method: "POST", headers: { "content-type": "application/json", "x-eduassist-device-id": deviceId }, body: JSON.stringify({ subjectName, subjectCode, semester, section }) });
+      const result = (await response.json()) as { classroom?: LiveClass; message?: string };
+      if (!response.ok || !result.classroom) throw new Error(result.message ?? "The class could not be created.");
+      setClasses((current) => [result.classroom as LiveClass, ...current]);
+      setShowCreate(false);
+      setView("classes");
+      setToast(`${subjectName} created. Join code: ${result.classroom.classCode}`);
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : "The class could not be created.");
+    }
   }
 
   function generateSummary() {
@@ -596,9 +519,9 @@ function AuthenticatedClassroom({
             <span>?</span> Help & Support
           </button>
           <div className="storage-card">
-            <div className="storage-top"><span>Storage</span><b>6.4 GB / 10 GB</b></div>
-            <div className="storage-bar"><i /></div>
-            <button onClick={() => navigate("materials")}>Manage storage →</button>
+            <div className="storage-top"><span>File storage</span><b>Next phase</b></div>
+            <div className="storage-bar"><i style={{ width: "0%" }} /></div>
+            <button onClick={() => navigate("materials")}>View preview →</button>
           </div>
         </div>
       </aside>
@@ -634,10 +557,10 @@ function AuthenticatedClassroom({
           </button>
           {showNotifications ? (
             <div className="notification-popover">
-              <div><b>Notifications</b><span>3 new</span></div>
-              <p><i className="dot mint" /> 39 students marked present.</p>
-              <p><i className="dot yellow" /> Quiz 4 is ready for review.</p>
-              <p><i className="dot blue" /> AI summary completed.</p>
+              <div><b>Notifications</b><span>Live</span></div>
+              <p><i className="dot mint" /> Class enrolments are stored securely.</p>
+              <p><i className="dot yellow" /> QR sessions expire automatically.</p>
+              <p><i className="dot blue" /> Reports update after each session.</p>
             </div>
           ) : null}
           {showProfile ? (
@@ -657,32 +580,16 @@ function AuthenticatedClassroom({
         <div className="content-area">
           {view === "overview" ? (
             role === "faculty" ? (
-              <FacultyOverview onNavigate={navigate} onStartAttendance={startSession} onCreate={() => setShowCreate(true)} />
+              <FacultyOverview userName={user.displayName} classes={classes} onNavigate={navigate} onStartAttendance={() => navigate("attendance")} onCreate={() => setShowCreate(true)} />
             ) : (
-              <StudentOverview onNavigate={navigate} present={studentPresent} />
+              <StudentOverview userName={user.displayName} classes={classes} onNavigate={navigate} />
             )
           ) : null}
           {view === "classes" ? (
-            <ClassesView
-              role={role}
-              classes={filteredClasses}
-              onCreate={() => setShowCreate(true)}
-              onOpen={() => setToast("Class workspace opened for CS301.")}
-            />
+            classesLoading ? <div className="report-loading"><span className="auth-loader"><i /><i /><i /></span><p>Loading classes…</p></div> : <LiveClassesView role={role} classes={filteredClasses} deviceId={deviceId} onCreate={() => setShowCreate(true)} onRefresh={refreshClasses} onNotify={setToast} />
           ) : null}
           {view === "attendance" ? (
-            <AttendanceView
-              role={role}
-              active={activeSession}
-              countdown={countdown}
-              present={studentPresent}
-              onStart={startSession}
-              onClose={closeSession}
-              onMark={() => {
-                setStudentPresent(true);
-                setToast("Attendance marked successfully at 11:34 AM.");
-              }}
-            />
+            <LiveAttendanceView role={role} classes={classes} deviceId={deviceId} onNotify={setToast} />
           ) : null}
           {view === "materials" ? (
             <MaterialsView
@@ -716,13 +623,13 @@ function AuthenticatedClassroom({
               }}
             />
           ) : null}
-          {view === "students" ? <StudentsView /> : null}
-          {view === "analytics" ? <AnalyticsView role={role} /> : null}
+          {view === "students" ? <LiveRosterView classes={classes} deviceId={deviceId} onRefreshClasses={refreshClasses} onNotify={setToast} /> : null}
+          {view === "analytics" ? <LiveReportsView role={role} classes={classes} deviceId={deviceId} /> : null}
         </div>
       </main>
 
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {nav.slice(0, 5).map((item) => (
+      <nav className={`mobile-nav ${role}`} aria-label="Mobile navigation">
+        {mobileNav.map((item) => (
           <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
             <span>{item.icon}</span>{item.label.split(" ").at(-1)}
           </button>
@@ -756,43 +663,45 @@ function AuthenticatedClassroom({
 }
 
 function FacultyOverview({
+  userName,
+  classes,
   onNavigate,
   onStartAttendance,
   onCreate,
 }: {
+  userName: string;
+  classes: LiveClass[];
   onNavigate: (view: View) => void;
   onStartAttendance: () => void;
   onCreate: () => void;
 }) {
+  const studentTotal = classes.reduce((sum, classroom) => sum + classroom.studentCount, 0);
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" }).toUpperCase();
   return (
     <>
       <section className="welcome-row">
-        <div><span className="eyebrow">TUESDAY · 21 JULY</span><h2>Good morning, Dr. Kapoor <span>✦</span></h2><p>Here’s what’s happening across your classes today.</p></div>
+        <div><span className="eyebrow">{today}</span><h2>Welcome, {userName} <span>✦</span></h2><p>Your classes, QR attendance, and reports now use live project data.</p></div>
         <button className="button primary" onClick={onCreate}><span>＋</span>Create class</button>
       </section>
 
       <section className="metrics-grid">
-        <MetricCard icon="▣" tone="navy" value="3" label="Active classes" note="120 students total" />
-        <MetricCard icon="✓" tone="mint" value="89%" label="Today's attendance" note="↑ 4% from last week" positive />
-        <MetricCard icon="▤" tone="blue" value="12" label="Study materials" note="3 added this month" />
-        <MetricCard icon="◇" tone="yellow" value="7" label="Published quizzes" note="84% average score" />
+        <MetricCard icon="▣" tone="navy" value={String(classes.length)} label="Active classes" note={`${studentTotal} total enrolments`} />
+        <MetricCard icon="✓" tone="mint" value="Live" label="QR attendance" note="2–5 minute secure sessions" positive />
+        <MetricCard icon="↗" tone="blue" value="CSV" label="Attendance reports" note="Student and session breakdowns" />
+        <MetricCard icon="✦" tone="yellow" value="Later" label="Notes and AI" note="Deferred to the next milestone" />
       </section>
 
       <section className="dashboard-grid">
         <div className="panel schedule-panel">
           <PanelHeader eyebrow="TODAY" title="Upcoming classes" action="View schedule" onAction={() => onNavigate("classes")} />
-          <div className="class-schedule-list">
-            <ScheduleItem time="11:30" meridiem="AM" code="CS301" title="Artificial Intelligence" meta="Semester 5 · Section A · Room 204" color="navy" active />
-            <ScheduleItem time="02:00" meridiem="PM" code="CS212" title="Data Structures" meta="Semester 3 · Section A · Lab 2" color="yellow" />
-            <ScheduleItem time="04:15" meridiem="PM" code="CS305" title="Machine Learning" meta="Semester 5 · Section B · Room 310" color="mint" />
-          </div>
+          <div className="class-schedule-list">{classes.slice(0, 3).map((classroom, index) => <ScheduleItem key={classroom.id} time={String(classroom.studentCount)} meridiem="STUDENTS" code={classroom.subjectCode} title={classroom.subjectName} meta={`${classroom.semester} · Section ${classroom.section} · Join ${classroom.classCode}`} color={["navy", "yellow", "mint"][index % 3]} active={index === 0} />)}{classes.length === 0 ? <div className="overview-empty"><b>No classes created yet</b><p>Create your first class to begin enrolment and QR attendance.</p></div> : null}</div>
         </div>
 
         <div className="panel attendance-chart-panel">
           <PanelHeader eyebrow="THIS WEEK" title="Attendance overview" action="View report" onAction={() => onNavigate("analytics")} />
-          <div className="chart-top"><div><b>89.2%</b><span>class average</span></div><span className="trend-pill">↗ 3.8%</span></div>
+          <div className="chart-top"><div><b>{classes.length ? "Ready" : "—"}</b><span>reporting status</span></div><span className="trend-pill">D1 verified</span></div>
           <div className="attendance-chart">
-            {[72, 86, 78, 92, 89].map((height, index) => (
+            {[0, 0, 0, 0, 0].map((height, index) => (
               <div className="bar-column" key={height + index}><div className="bar-track"><i style={{ height: `${height}%` }} className={index === 4 ? "current" : ""} /></div><span>{["Mon", "Tue", "Wed", "Thu", "Fri"][index]}</span></div>
             ))}
           </div>
@@ -802,9 +711,9 @@ function FacultyOverview({
           <PanelHeader eyebrow="SHORTCUTS" title="Quick actions" />
           <div className="quick-grid">
             <QuickAction icon="◫" tone="navy" title="Start attendance" detail="Create secure QR" onClick={onStartAttendance} />
-            <QuickAction icon="↑" tone="blue" title="Upload notes" detail="PDF, DOCX, PPTX" onClick={() => onNavigate("materials")} />
-            <QuickAction icon="✦" tone="yellow" title="Generate quiz" detail="From your notes" onClick={() => onNavigate("quizzes")} />
-            <QuickAction icon="♙" tone="mint" title="Manage students" detail="42 in CS301" onClick={() => onNavigate("students")} />
+            <QuickAction icon="↑" tone="blue" title="Preview notes" detail="Planned next milestone" onClick={() => onNavigate("materials")} />
+            <QuickAction icon="✦" tone="yellow" title="Preview quizzes" detail="Planned next milestone" onClick={() => onNavigate("quizzes")} />
+            <QuickAction icon="♙" tone="mint" title="Manage students" detail={`${studentTotal} enrolled`} onClick={() => onNavigate("students")} />
           </div>
         </div>
 
@@ -821,42 +730,42 @@ function FacultyOverview({
   );
 }
 
-function StudentOverview({ onNavigate, present }: { onNavigate: (view: View) => void; present: boolean }) {
+function StudentOverview({ userName, classes, onNavigate }: { userName: string; classes: LiveClass[]; onNavigate: (view: View) => void }) {
   return (
     <>
       <section className="student-hero">
         <div className="student-hero-copy">
           <span className="eyebrow light">YOUR LEARNING SPACE</span>
-          <h2>Ready for a productive day, Aarav?</h2>
-          <p>Your AI class begins at 11:30 AM. Attendance opens when your faculty starts the session.</p>
-          <div className="hero-actions"><button className="button yellow" onClick={() => onNavigate("attendance")}>{present ? "Attendance marked ✓" : "Scan attendance QR"}</button><button className="text-button light" onClick={() => onNavigate("classes")}>View today’s classes →</button></div>
+          <h2>Ready for class, {userName}?</h2>
+          <p>Attendance opens when your faculty starts a secure QR session for an enrolled class.</p>
+          <div className="hero-actions"><button className="button yellow" onClick={() => onNavigate("attendance")}>Scan attendance QR</button><button className="text-button light" onClick={() => onNavigate("classes")}>View enrolled classes →</button></div>
         </div>
         <div className="hero-orbit" aria-hidden="true"><span className="orbit one">AI</span><span className="orbit two">✓</span><span className="orbit three">A+</span><div>✦</div></div>
       </section>
 
       <section className="metrics-grid student-metrics">
-        <MetricCard icon="▣" tone="navy" value="3" label="Enrolled classes" note="Next: AI at 11:30" />
-        <MetricCard icon="✓" tone="mint" value="91%" label="My attendance" note="On track this semester" positive />
-        <MetricCard icon="▤" tone="blue" value="4" label="New summaries" note="2 unread this week" />
-        <MetricCard icon="◇" tone="yellow" value="2" label="Quizzes due" note="Nearest due tomorrow" />
+        <MetricCard icon="▣" tone="navy" value={String(classes.length)} label="Enrolled classes" note="Joined using faculty codes" />
+        <MetricCard icon="✓" tone="mint" value="Live" label="My attendance" note="Open the report for your percentage" positive />
+        <MetricCard icon="↗" tone="blue" value="CSV" label="My reports" note="Download verified history" />
+        <MetricCard icon="✦" tone="yellow" value="Later" label="Notes and quizzes" note="Planned next milestone" />
       </section>
 
       <section className="dashboard-grid student-grid">
         <div className="panel learning-panel">
-          <PanelHeader eyebrow="CONTINUE LEARNING" title="Recent study materials" action="View all" onAction={() => onNavigate("materials")} />
+          <PanelHeader eyebrow="NEXT MILESTONE" title="Notes and AI modules" action="Preview" onAction={() => onNavigate("materials")} />
           <div className="material-card-list">
-            <button onClick={() => onNavigate("materials")}><span className="file-icon pdf">PDF</span><div><b>Intelligent Agents</b><p>AI-generated revision notes · 8 min read</p></div><em>68%</em></button>
-            <button onClick={() => onNavigate("materials")}><span className="file-icon doc">DOC</span><div><b>Search Strategies</b><p>Key points and definitions · 6 min read</p></div><em>New</em></button>
+            <button onClick={() => onNavigate("materials")}><span className="file-icon pdf">PDF</span><div><b>Notes upload</b><p>File storage and text extraction will be added later.</p></div><em>Later</em></button>
+            <button onClick={() => onNavigate("quizzes")}><span className="file-icon doc">AI</span><div><b>AI quizzes</b><p>Grounded generation will follow the attendance milestone.</p></div><em>Later</em></button>
           </div>
         </div>
         <div className="panel deadline-panel">
-          <PanelHeader eyebrow="UP NEXT" title="Quiz deadline" />
-          <div className="deadline-body"><span className="quiz-big-icon">◇</span><div><b>Search Strategies</b><p>10 questions · 15 minutes</p><div className="deadline"><span>Due tomorrow</span><b>6:00 PM</b></div></div></div>
-          <button className="button primary full" onClick={() => onNavigate("quizzes")}>Start quiz</button>
+          <PanelHeader eyebrow="AVAILABLE NOW" title="QR attendance" />
+          <div className="deadline-body"><span className="quiz-big-icon">⌗</span><div><b>Secure class check-in</b><p>Camera scan with manual-code fallback</p><div className="deadline"><span>Session validity</span><b>2–5 min</b></div></div></div>
+          <button className="button primary full" onClick={() => onNavigate("attendance")}>Open attendance</button>
         </div>
         <div className="panel progress-panel">
-          <PanelHeader eyebrow="SEMESTER 5" title="Learning progress" action="View results" onAction={() => onNavigate("analytics")} />
-          <div className="progress-score"><div className="score-ring"><span>88<b>%</b></span></div><div><b>Great momentum!</b><p>You improved 6% over your last three quizzes.</p><span className="trend-pill">↗ Keep it up</span></div></div>
+          <PanelHeader eyebrow="LIVE DATA" title="Attendance progress" action="View report" onAction={() => onNavigate("analytics")} />
+          <div className="progress-score"><div className="score-ring"><span>✓</span></div><div><b>Your verified history</b><p>Completed sessions, attendance percentage, and status are available in My Reports.</p><span className="trend-pill">↗ Open report</span></div></div>
         </div>
       </section>
     </>
@@ -879,65 +788,15 @@ function QuickAction({ icon, tone, title, detail, onClick }: { icon: string; ton
   return <button className="quick-action" onClick={onClick}><span className={`quick-icon ${tone}`}>{icon}</span><div><b>{title}</b><p>{detail}</p></div><span className="quick-arrow">↗</span></button>;
 }
 
-function ClassesView({ role, classes, onCreate, onOpen }: { role: Role; classes: ClassItem[]; onCreate: () => void; onOpen: () => void }) {
-  return (
-    <section className="page-stack">
-      <div className="section-title-row"><div><span className="eyebrow">ACADEMIC YEAR 2026–27</span><h2>{role === "faculty" ? "Your classes" : "Enrolled classes"}</h2><p>{role === "faculty" ? "Organise lessons, learners and performance in one place." : "Everything you need for your active semester."}</p></div>{role === "faculty" ? <button className="button primary" onClick={onCreate}>＋ Create class</button> : <button className="button primary" onClick={onOpen}>Join with code</button>}</div>
-      <div className="filter-row"><button className="filter-chip active">All classes <span>{classes.length}</span></button><button className="filter-chip">Semester 5</button><button className="filter-chip">Semester 3</button><select aria-label="Sort classes"><option>Recently active</option><option>Subject name</option></select></div>
-      <div className="class-card-grid">
-        {classes.map((item, index) => (
-          <article className="class-card" key={`${item.code}-${index}`}>
-            <div className={`class-card-top ${item.accent}`}><span>{item.code}</span><button aria-label="Class menu">•••</button><div className="class-monogram">{item.name.split(" ").map((word) => word[0]).slice(0, 2).join("")}</div></div>
-            <div className="class-card-body"><h3>{item.name}</h3><p>{item.section}</p><div className="class-stats"><span><b>{item.students}</b> students</span><span><b>{index + 3}</b> materials</span><span><b>{index + 1}</b> quizzes</span></div><div className="next-class"><span>Next class</span><b>{item.next}</b></div><button className="button outline full" onClick={onOpen}>Open class <span>→</span></button></div>
-          </article>
-        ))}
-        {classes.length === 0 ? <div className="empty-state"><span>⌕</span><h3>No classes match that search</h3><p>Try a subject name, class code or section.</p></div> : null}
-      </div>
-    </section>
-  );
-}
-
-function AttendanceView({ role, active, countdown, present, onStart, onClose, onMark }: { role: Role; active: boolean; countdown: number; present: boolean; onStart: () => void; onClose: () => void; onMark: () => void }) {
-  if (role === "student") {
-    return (
-      <section className="attendance-student-page page-stack">
-        <div className="section-title-row"><div><span className="eyebrow">CS301 · ARTIFICIAL INTELLIGENCE</span><h2>Mark attendance</h2><p>Scan the faculty QR code while the session is active.</p></div><span className={present ? "status-pill success" : "status-pill waiting"}>{present ? "✓ Present" : "● Waiting for scan"}</span></div>
-        <div className="scanner-layout">
-          <div className="scanner-card panel"><div className={present ? "scanner-frame complete" : "scanner-frame"}><span className="corner c1" /><span className="corner c2" /><span className="corner c3" /><span className="corner c4" /><div className="scan-symbol">{present ? "✓" : "⌗"}</div>{!present ? <i className="scan-line" /> : null}</div><h3>{present ? "Attendance recorded!" : "Point your camera at the QR"}</h3><p>{present ? "Tuesday, 21 July · 11:34 AM" : "For this demo, use the secure session below."}</p>{present ? <div className="confirmation-card"><span>CS301</span><div><b>Artificial Intelligence</b><p>Room 204 · Dr. Maya Kapoor</p></div></div> : <button className="button primary full" onClick={onMark}>Simulate secure scan</button>}</div>
-          <div className="panel attendance-history"><PanelHeader eyebrow="THIS SEMESTER" title="Attendance history" /><div className="history-summary"><div className="score-ring small"><span>91<b>%</b></span></div><div><b>41 of 45 sessions</b><p>You are safely above the required 75%.</p></div></div>{[["18 Jul", "Present"], ["16 Jul", "Present"], ["14 Jul", "Absent"], ["11 Jul", "Present"]].map((row) => <div className="history-row" key={row[0]}><span>{row[0]}</span><b>{row[1]}</b><i className={row[1] === "Present" ? "present" : "absent"} /></div>)}</div>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="page-stack">
-      <div className="section-title-row"><div><span className="eyebrow">CS301 · ARTIFICIAL INTELLIGENCE</span><h2>Attendance session</h2><p>Create a temporary QR code valid only for enrolled students.</p></div>{active ? <button className="button danger" onClick={onClose}>Close & save session</button> : <button className="button primary" onClick={onStart}>◫ Start attendance</button>}</div>
-      <div className="attendance-layout">
-        <div className="panel qr-panel">
-          <div className="qr-header"><div><span className={active ? "status-pill success" : "status-pill waiting"}>{active ? "● Session active" : "○ Session closed"}</span><h3>Tuesday lecture</h3><p>Room 204 · 11:30 AM</p></div><div className="timer"><span>EXPIRES IN</span><b>{active ? formatTime(countdown) : "04:00"}</b></div></div>
-          <div className={active ? "qr-code" : "qr-code disabled"}>{qrCells.map((on, index) => <i key={index} className={on ? "on" : ""} />)}</div>
-          <div className="session-code"><span>Session ID</span><b>ATT-CS301-721</b><button onClick={() => navigator.clipboard?.writeText("ATT-CS301-721")}>Copy</button></div>
-          {!active ? <button className="button primary full" onClick={onStart}>Generate secure QR</button> : <p className="secure-note">⌾ Login, enrolment and one-scan validation are active.</p>}
-        </div>
-        <div className="panel live-attendance-panel">
-          <PanelHeader eyebrow="LIVE ROSTER" title="Student check-ins" />
-          <div className="roster-summary"><div><b>{active ? "39" : "0"}<span>/ 42</span></b><p>Students present</p></div><span className="trend-pill">{active ? "93%" : "Not started"}</span></div>
-          <div className="roster-progress"><i style={{ width: active ? "93%" : "0%" }} /></div>
-          <div className="student-checkins">
-            {(active ? students.slice(0, 4) : students.slice(0, 3)).map((student, index) => <div key={student[1]}><span className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</span><div><b>{student[0]}</b><p>{student[1]}</p></div><time>{active ? `${index + 1} min ago` : "Not marked"}</time><span className={active ? "check" : "pending"}>{active ? "✓" : "—"}</span></div>)}
-          </div>
-          <button className="text-button centered">View full roster →</button>
-        </div>
-      </div>
-    </section>
-  );
+function FutureModuleNotice() {
+  return <div className="future-module-banner"><span>⌁</span><div><b>Next-phase interface preview</b><p>This screen is not connected to file storage or AI yet. Nothing selected here is uploaded or saved.</p></div></div>;
 }
 
 function MaterialsView({ role, fileName, summaryReady, loading, onFile, onGenerate }: { role: Role; fileName: string; summaryReady: boolean; loading: boolean; onFile: (name: string) => void; onGenerate: () => void }) {
   return (
     <section className="page-stack">
       <div className="section-title-row"><div><span className="eyebrow">AI-POWERED LEARNING</span><h2>{role === "faculty" ? "Study materials" : "Notes & summaries"}</h2><p>{role === "faculty" ? "Upload source notes, then turn them into clear revision material." : "Read concise, faculty-reviewed summaries for your subjects."}</p></div>{role === "faculty" ? <label className="button primary upload-button">↑ Upload notes<input type="file" accept=".pdf,.docx,.pptx,.txt" onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0].name)} /></label> : null}</div>
+      <FutureModuleNotice />
       {role === "faculty" ? (
         <div className="materials-layout">
           <div className="panel upload-panel"><PanelHeader eyebrow="SOURCE DOCUMENT" title="Upload and process" /><label className="drop-zone"><input type="file" accept=".pdf,.docx,.pptx,.txt" onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0].name)} /><span className="upload-orbit">↑</span><h3>{fileName || "Drop your lecture notes here"}</h3><p>{fileName ? "Document accepted · Ready for AI processing" : "or click to browse · PDF, DOCX, PPTX or TXT up to 10 MB"}</p><small>Files are validated before processing</small></label><div className="summary-options"><label>Summary type<select defaultValue="Revision notes"><option>Short summary</option><option>Detailed summary</option><option>Key points</option><option>Revision notes</option></select></label><button className="button primary" disabled={loading} onClick={onGenerate}>{loading ? "Generating…" : "✦ Generate summary"}</button></div></div>
@@ -966,6 +825,7 @@ function QuizzesView({ role, published, answers, result, onAnswer, onSubmit, onG
   if (role === "student") {
     return (
       <section className="page-stack quiz-page">
+        <FutureModuleNotice />
         <div className="quiz-topline"><div><span className="eyebrow">CS301 · QUIZ 04</span><h2>Search Strategies</h2><p>3 questions · 1 mark each · Attempt all questions</p></div><div className="quiz-timer"><span>TIME LEFT</span><b>14:32</b></div></div>
         {result !== null ? <div className="result-banner"><span>✦</span><div><h3>Quiz complete — {result}/{quizQuestions.length}</h3><p>{result === quizQuestions.length ? "Perfect score. Excellent work!" : "Review the summary and try the concepts again."}</p></div><div className="score-bubble">{Math.round((result / quizQuestions.length) * 100)}%</div></div> : null}
         <div className="question-list">{quizQuestions.map((question, questionIndex) => <article className="panel question-card" key={question.question}><div className="question-number">{String(questionIndex + 1).padStart(2, "0")}</div><div className="question-content"><h3>{question.question}</h3><div className="option-grid">{question.options.map((option, optionIndex) => <button className={answers[questionIndex] === optionIndex ? "selected" : ""} onClick={() => onAnswer(questionIndex, optionIndex)} key={option}><span>{String.fromCharCode(65 + optionIndex)}</span>{option}</button>)}</div>{result !== null ? <p className="answer-explanation"><b>Answer: {question.options[question.answer]}.</b> This follows directly from the published class summary.</p> : null}</div></article>)}</div>
@@ -976,23 +836,12 @@ function QuizzesView({ role, published, answers, result, onAnswer, onSubmit, onG
 
   return (
     <section className="page-stack">
+      <FutureModuleNotice />
       <div className="section-title-row"><div><span className="eyebrow">AI QUIZ STUDIO</span><h2>Create a grounded quiz</h2><p>Generate questions from your notes, review every answer, then publish.</p></div><span className={published ? "status-pill success" : "status-pill draft"}>{published ? "✓ Published" : "○ Draft review"}</span></div>
       <div className="quiz-builder-layout">
         <div className="panel quiz-settings"><PanelHeader eyebrow="QUIZ SETTINGS" title="Search Strategies" /><label>Source material<select><option>Search Strategies.pdf</option><option>Intelligent Agents.pdf</option></select></label><div className="form-row"><label>Questions<select defaultValue="3"><option>3</option><option>5</option><option>10</option></select></label><label>Difficulty<select><option>Medium</option><option>Easy</option><option>Hard</option></select></label></div><label>Question type<div className="segmented-field"><button className="active">Multiple choice</button><button>True / false</button></div></label><div className="form-row"><label>Duration<input value="15 minutes" readOnly /></label><label>Marks<input value="1 each" readOnly /></label></div><button className="button yellow full" onClick={onGenerate}>✦ Regenerate questions</button><div className="grounded-note"><span>⌾</span><p><b>Grounded generation</b><br />Questions use only uploaded notes and require faculty review.</p></div></div>
         <div className="question-editor"><div className="editor-heading"><div><span className="eyebrow">QUESTION REVIEW</span><h3>{quizQuestions.length} generated questions</h3></div><button className="button primary" onClick={onPublish}>{published ? "Republish changes" : "Publish quiz"}</button></div>{quizQuestions.map((question, index) => <article className="panel editor-card" key={question.question}><div className="editor-card-top"><span>QUESTION {String(index + 1).padStart(2, "0")}</span><div><button aria-label="Edit question">✎</button><button aria-label="Delete question">×</button></div></div><h3>{question.question}</h3><div className="editor-options">{question.options.map((option, optionIndex) => <div className={optionIndex === question.answer ? "correct" : ""} key={option}><span>{String.fromCharCode(65 + optionIndex)}</span><p>{option}</p>{optionIndex === question.answer ? <b>✓ Correct</b> : null}</div>)}</div></article>)}</div>
       </div>
     </section>
-  );
-}
-
-function StudentsView() {
-  return (
-    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">CS301 · SECTION A</span><h2>Student roster</h2><p>Track attendance and learning performance. Account recovery is restricted to the administrator.</p></div><button className="button primary">＋ Add student</button></div><div className="panel data-panel"><div className="table-toolbar"><div className="mini-search">⌕ <input placeholder="Search student or roll number" /></div><button className="button outline">Export CSV ↓</button></div><div className="student-table"><div className="table-row table-head"><span>Student</span><span>Roll number</span><span>Attendance</span><span>Quiz average</span><span>Status</span><span /></div>{students.map((student, index) => <div className="table-row" key={student[1]}><span className="student-cell"><i className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</i><b>{student[0]}</b></span><span>{student[1]}</span><span><b>{student[2]}</b></span><span><b>{student[3]}%</b></span><span><i className={Number.parseInt(student[2]) > 85 ? "status-dot good" : "status-dot watch"} />{Number.parseInt(student[2]) > 85 ? "On track" : "Needs attention"}</span><button className="table-more" aria-label={`More options for ${student[0]}`}>•••</button></div>)}</div></div></section>
-  );
-}
-
-function AnalyticsView({ role }: { role: Role }) {
-  return (
-    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">SEMESTER 5 · 2026–27</span><h2>{role === "faculty" ? "Class analytics" : "My performance"}</h2><p>{role === "faculty" ? "Turn attendance and assessment data into timely action." : "See your progress across attendance and quiz outcomes."}</p></div><button className="button outline">Download report ↓</button></div><section className="metrics-grid"><MetricCard icon="✓" tone="mint" value={role === "faculty" ? "89%" : "91%"} label="Attendance average" note="↑ 3.8% this month" positive /><MetricCard icon="◇" tone="yellow" value={role === "faculty" ? "84%" : "88%"} label="Quiz average" note="↑ 6% over 3 quizzes" positive /><MetricCard icon="▣" tone="navy" value={role === "faculty" ? "39" : "7"} label={role === "faculty" ? "On-track students" : "Quizzes completed"} note="Consistent performance" /><MetricCard icon="↗" tone="blue" value="A" label="Current grade band" note="Strong academic progress" /></section><div className="analytics-grid"><div className="panel analytics-chart"><PanelHeader eyebrow="12-WEEK VIEW" title={role === "faculty" ? "Attendance trend" : "My score trend"} /><div className="line-chart"><div className="grid-lines"><i /><i /><i /><i /></div><div className="line-fill" /><div className="line-points">{[58, 44, 49, 32, 38, 22, 28].map((top, index) => <i key={top} style={{ left: `${index * 16.6}%`, top: `${top}%` }}><span>{[78, 84, 82, 89, 86, 94, 91][index]}%</span></i>)}</div></div><div className="chart-labels"><span>Week 1</span><span>Week 4</span><span>Week 8</span><span>Week 12</span></div></div><div className="panel insights-panel"><PanelHeader eyebrow="AI INSIGHTS" title="What to focus on" /><div className="insight good"><span>↗</span><div><b>Positive momentum</b><p>Performance improved most after revision summaries were published.</p></div></div><div className="insight warn"><span>!</span><div><b>Attention point</b><p>{role === "faculty" ? "Five learners are close to the attendance threshold." : "Graph search questions need one more revision pass."}</p></div></div><div className="insight info"><span>✦</span><div><b>Suggested next step</b><p>Review “Search Strategies” before the next assessment.</p></div></div></div></div></section>
   );
 }

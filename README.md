@@ -2,8 +2,8 @@
 
 EduAssist is an interactive smart-classroom workspace with separate administrator,
 faculty, and student experiences. It brings account administration,
-device-registered access, attendance, AI-assisted study materials, quiz generation,
-class management, and learning analytics into one calm, responsive interface.
+device-registered access, persistent class management, secure QR attendance, and
+verified attendance reporting into one calm, responsive interface.
 
 ## Prerequisites
 
@@ -38,15 +38,28 @@ administrator can release somebody else's device for recovery.
 - PBKDF2 password hashing, forced first-login password changes, and seven-day sessions
 - One-device account binding with second-device blocking and controlled release
 - Read-only audit history for login, device, password, and account actions
-- Four-minute QR-style attendance sessions with a live roster
-- Study-material upload flow with generated summary cards
-- Quiz generation, review, publishing, student attempts, and scoring
-- Student directory, attendance breakdowns, and class analytics
+- Persistent faculty classes with unique student join codes
+- Faculty roster management using existing student user IDs
+- Two-to-five-minute QR attendance sessions with live check-ins and a manual-code fallback
+- Enrolment, session-expiry, duplicate-submission, and class-membership checks on the server
+- Automatic absent records when a session closes, plus faculty corrections for present/late/absent
+- Faculty and student attendance reports with per-session history, percentages, and CSV export
 - Mobile navigation and responsive views for smaller screens
 
-Authentication and device registration are persisted in D1. Classroom content
-remains demo data in browser state; connect the existing R2 binding and an AI
-provider before using file processing or generated content in production.
+Authentication, classes, enrolments, attendance sessions, check-ins, and reports
+are persisted in D1. The Notes & AI Summary and Quiz sections are interface previews
+reserved for the next project phase; they do not yet upload files, call an AI model,
+or save generated content. Configure R2 storage and an AI provider before enabling
+those workflows in production.
+
+## Attendance workflow
+
+1. The administrator creates the faculty and student accounts.
+2. Faculty creates a class and shares its seven-character join code, or adds a student by user ID.
+3. Faculty opens **Attendance**, chooses a two-to-five-minute duration, and generates the secure QR.
+4. An enrolled student scans the QR from their registered device or enters its fallback code.
+5. Faculty watches the roster update, closes the session, and corrects exceptions if needed.
+6. Both roles open **Reports** to review the saved results or export CSV.
 
 The browser model intentionally uses a random installation identifier rather
 than hardware IMEI data, which browsers do not safely expose. A future native

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const authUsers = sqliteTable("auth_users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -58,3 +58,76 @@ export const authSystemFlags = sqliteTable("auth_system_flags", {
   value: text("value").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const classroomClasses = sqliteTable(
+  "classroom_classes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    subjectName: text("subject_name").notNull(),
+    subjectCode: text("subject_code").notNull(),
+    semester: text("semester").notNull(),
+    section: text("section").notNull(),
+    classCode: text("class_code").notNull(),
+    facultyUserId: integer("faculty_user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("classroom_classes_code_unique").on(table.classCode),
+    index("classroom_classes_faculty_idx").on(table.facultyUserId),
+  ],
+);
+
+export const classEnrolments = sqliteTable(
+  "class_enrolments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    classId: integer("class_id").notNull().references(() => classroomClasses.id, { onDelete: "cascade" }),
+    studentUserId: integer("student_user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("class_enrolments_unique").on(table.classId, table.studentUserId),
+    index("class_enrolments_student_idx").on(table.studentUserId),
+  ],
+);
+
+export const attendanceSessions = sqliteTable(
+  "attendance_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    classId: integer("class_id").notNull().references(() => classroomClasses.id, { onDelete: "cascade" }),
+    qrToken: text("qr_token").notNull(),
+    manualCode: text("manual_code").notNull(),
+    startsAt: text("starts_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+    status: text("status", { enum: ["active", "closed"] }).notNull().default("active"),
+    createdBy: integer("created_by").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    closedAt: text("closed_at"),
+  },
+  (table) => [
+    uniqueIndex("attendance_sessions_token_unique").on(table.qrToken),
+    uniqueIndex("attendance_sessions_code_unique").on(table.manualCode),
+    uniqueIndex("attendance_sessions_active_unique").on(table.classId).where(sql`${table.status} = 'active'`),
+    index("attendance_sessions_class_idx").on(table.classId),
+    index("attendance_sessions_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const attendanceRecords = sqliteTable(
+  "attendance_records",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id").notNull().references(() => attendanceSessions.id, { onDelete: "cascade" }),
+    studentUserId: integer("student_user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["present", "late", "absent"] }).notNull(),
+    source: text("source", { enum: ["qr", "manual", "automatic"] }).notNull(),
+    markedAt: text("marked_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    correctedBy: integer("corrected_by").references(() => authUsers.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("attendance_records_unique").on(table.sessionId, table.studentUserId),
+    index("attendance_records_student_idx").on(table.studentUserId),
+  ],
+);

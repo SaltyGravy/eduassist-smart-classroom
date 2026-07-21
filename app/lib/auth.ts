@@ -188,6 +188,10 @@ async function getAuthDb() {
   return getBinding();
 }
 
+export async function getAppDatabase() {
+  return getAuthDb();
+}
+
 async function derivePassword(password: string, salt: string) {
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
@@ -367,6 +371,12 @@ export async function getSession(request: Request) {
     .bind(tokenHash, deviceHash, deviceHash)
     .first()) as SessionRow | null;
   return row ? { user: publicUser(row), userRow: row, tokenHash } : null;
+}
+
+export async function getAuthorizedSession(request: Request, roles: AuthRole[]) {
+  const session = await getSession(request);
+  if (!session || session.user.mustChangePassword || !roles.includes(session.user.role)) return null;
+  return { user: session.user, databaseUserId: session.userRow.id };
 }
 
 export async function logoutSession(request: Request) {
