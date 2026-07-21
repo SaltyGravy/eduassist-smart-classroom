@@ -22,15 +22,14 @@ async function render(pathname = "/") {
   );
 }
 
-test("server-renders the EduAssist classroom workspace", async () => {
+test("server-renders the protected EduAssist entry point", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /<title>EduAssist — AI Smart Classroom<\/title>/i);
-  assert.match(html, /Good morning, Dr\. Kapoor/i);
-  assert.match(html, /Start attendance/i);
-  assert.match(html, /Generate quiz/i);
+  assert.match(html, /Securing your workspace/i);
+  assert.doesNotMatch(html, /Good morning, Dr\. Kapoor|Start attendance/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });

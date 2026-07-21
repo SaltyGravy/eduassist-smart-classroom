@@ -3,6 +3,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Role = "faculty" | "student";
+type AuthUser = {
+  userId: string;
+  displayName: string;
+  role: Role;
+  deviceLabel: string;
+  deviceRegisteredAt: string;
+};
+
+type LoginResult = {
+  user: AuthUser;
+  registeredNow: boolean;
+};
 type View =
   | "overview"
   | "classes"
@@ -124,8 +136,247 @@ function makeQrCells() {
 
 const qrCells = makeQrCells();
 
-export function ClassroomApp() {
+function getOrCreateDeviceId() {
+  const storageKey = "eduassist-device-registration";
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    window.localStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+function describeCurrentDevice() {
+  const userAgent = navigator.userAgent;
+  const browser = userAgent.includes("Edg/")
+    ? "Edge"
+    : userAgent.includes("Chrome/")
+      ? "Chrome"
+      : userAgent.includes("Firefox/")
+        ? "Firefox"
+        : userAgent.includes("Safari/")
+          ? "Safari"
+          : "Web browser";
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
+    ?? navigator.platform
+    ?? "this device";
+  return `${browser} on ${platform}`;
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function formatRegisteredDate(value: string) {
+  const parsed = new Date(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
+  if (Number.isNaN(parsed.getTime())) return "recently";
+  return parsed.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function AuthLoading() {
+  return (
+    <main className="auth-loading-screen">
+      <span className="brand-mark auth-brand-mark"><i /><i /><i /></span>
+      <h1>Edu<span>Assist</span></h1>
+      <div className="auth-loader"><i /><i /><i /></div>
+      <p>Securing your workspace…</p>
+    </main>
+  );
+}
+
+function LoginScreen({
+  deviceId,
+  notice,
+  onAuthenticated,
+}: {
+  deviceId: string;
+  notice: string;
+  onAuthenticated: (result: LoginResult) => void;
+}) {
   const [role, setRole] = useState<Role>("faculty");
+  const [userId, setUserId] = useState("FAC001");
+  const [password, setPassword] = useState("Faculty@123");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [deviceBlocked, setDeviceBlocked] = useState(false);
+  const deviceLabel = useMemo(() => describeCurrentDevice(), []);
+
+  function chooseRole(nextRole: Role) {
+    setRole(nextRole);
+    setUserId(nextRole === "faculty" ? "FAC001" : "STU001");
+    setPassword(nextRole === "faculty" ? "Faculty@123" : "Student@123");
+    setError("");
+    setDeviceBlocked(false);
+  }
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    setDeviceBlocked(false);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role, userId, password, deviceId, deviceLabel }),
+      });
+      const result = (await response.json()) as LoginResult & { code?: string; message?: string };
+      if (!response.ok) {
+        setDeviceBlocked(result.code === "DEVICE_MISMATCH");
+        setError(result.message ?? "Login failed. Please try again.");
+        return;
+      }
+      onAuthenticated(result);
+    } catch {
+      setError("EduAssist could not reach the secure login service. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-story">
+        <div className="login-brand"><span className="brand-mark"><i /><i /><i /></span><b>Edu<span>Assist</span></b></div>
+        <div className="login-story-copy">
+          <span className="eyebrow light">PERSONAL COLLEGE PROJECT</span>
+          <h1>One classroom.<br />One trusted device.</h1>
+          <p>Explore a secure faculty and student workspace without needing access to your college systems.</p>
+          <div className="security-points">
+            <div><span>01</span><p><b>Role-based access</b>Faculty and students enter separate workspaces with their own credentials.</p></div>
+            <div><span>02</span><p><b>First-login registration</b>The first successful login binds the account to this browser installation.</p></div>
+            <div><span>03</span><p><b>Controlled device change</b>Release the old device before registering a new one, inspired by UTS handset binding.</p></div>
+          </div>
+        </div>
+        <p className="login-story-foot">Protected sessions · Password hashing · Device-bound access</p>
+      </section>
+
+      <section className="login-panel-wrap">
+        <div className="login-panel">
+          <div className="login-heading"><span className="eyebrow">SECURE ACCESS</span><h2>Welcome back</h2><p>Select your role and sign in with your project account.</p></div>
+
+          {notice ? <div className="auth-message success"><span>✓</span><p>{notice}</p></div> : null}
+          {error ? <div className={deviceBlocked ? "auth-message blocked" : "auth-message error"}><span>{deviceBlocked ? "⌁" : "!"}</span><div><b>{deviceBlocked ? "Registered on another device" : "Unable to sign in"}</b><p>{error}</p></div></div> : null}
+
+          <form onSubmit={submitLogin} className="login-form">
+            <fieldset className="login-role-picker">
+              <legend>Choose workspace</legend>
+              <div>
+                <button type="button" className={role === "faculty" ? "active" : ""} onClick={() => chooseRole("faculty")}><span>♙</span><b>Faculty</b><small>Manage classes</small></button>
+                <button type="button" className={role === "student" ? "active" : ""} onClick={() => chooseRole("student")}><span>▤</span><b>Student</b><small>Learn & respond</small></button>
+              </div>
+            </fieldset>
+
+            <label className="auth-field"><span>User ID</span><div><i>⌁</i><input value={userId} onChange={(event) => setUserId(event.target.value.toUpperCase())} autoComplete="username" required placeholder={role === "faculty" ? "FAC001" : "STU001"} /></div></label>
+            <label className="auth-field"><span>Password</span><div><i>•</i><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? "Hide" : "Show"}</button></div></label>
+
+            <div className="device-registration-preview"><span className="device-preview-icon">▣</span><div><b>This device will be verified</b><p>{deviceLabel}</p><small>A secure installation ID is used—never your IMEI or personal files.</small></div><i className="device-ready">READY</i></div>
+
+            <button className="button primary auth-submit" type="submit" disabled={submitting || !deviceId}>{submitting ? "Verifying device…" : "Login securely"}<span>→</span></button>
+          </form>
+
+          <div className="demo-credentials">
+            <div><span className="eyebrow">DEMO ACCOUNTS</span><p>Use these credentials for your personal presentation.</p></div>
+            <button type="button" onClick={() => chooseRole("faculty")}><span className="credential-role faculty">F</span><p><b>FAC001</b><small>Faculty@123</small></p><i>Use</i></button>
+            <button type="button" onClick={() => chooseRole("student")}><span className="credential-role student">S</span><p><b>STU001</b><small>Student@123</small></p><i>Use</i></button>
+          </div>
+
+          <p className="auth-disclaimer">Web browsers cannot safely expose hardware IMEI values. This model uses a privacy-safe browser installation ID; a future native Android/iOS app can add device attestation.</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export function ClassroomApp() {
+  const [authState, setAuthState] = useState<
+    | { status: "loading" }
+    | { status: "guest" }
+    | { status: "authenticated"; user: AuthUser }
+  >({ status: "loading" });
+  const [deviceId, setDeviceId] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+
+  useEffect(() => {
+    const currentDeviceId = getOrCreateDeviceId();
+    setDeviceId(currentDeviceId);
+    fetch("/api/auth/session", {
+      cache: "no-store",
+      headers: { "x-eduassist-device-id": currentDeviceId },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("No active session");
+        return (await response.json()) as { user: AuthUser };
+      })
+      .then(({ user }) => setAuthState({ status: "authenticated", user }))
+      .catch(() => setAuthState({ status: "guest" }));
+  }, []);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { "x-eduassist-device-id": deviceId },
+    }).catch(() => null);
+    setAuthNotice("You have signed out. This browser remains registered to the account.");
+    setAuthState({ status: "guest" });
+  }
+
+  async function releaseDevice() {
+    const response = await fetch("/api/auth/release-device", {
+      method: "POST",
+      headers: { "x-eduassist-device-id": deviceId },
+    });
+    if (!response.ok) throw new Error("The registered device could not be released.");
+    setAuthNotice("Device released. The next successful login will register a new browser.");
+    setAuthState({ status: "guest" });
+  }
+
+  if (authState.status === "loading") return <AuthLoading />;
+  if (authState.status === "guest") {
+    return (
+      <LoginScreen
+        deviceId={deviceId}
+        notice={authNotice}
+        onAuthenticated={(result) => {
+          setAuthNotice("");
+          setAuthState({ status: "authenticated", user: result.user });
+        }}
+      />
+    );
+  }
+
+  return (
+    <AuthenticatedClassroom
+      user={authState.user}
+      deviceId={deviceId}
+      onSignOut={signOut}
+      onReleaseDevice={releaseDevice}
+    />
+  );
+}
+
+function AuthenticatedClassroom({
+  user,
+  deviceId,
+  onSignOut,
+  onReleaseDevice,
+}: {
+  user: AuthUser;
+  deviceId: string;
+  onSignOut: () => Promise<void>;
+  onReleaseDevice: () => Promise<void>;
+}) {
+  const role = user.role;
   const [view, setView] = useState<View>("overview");
   const [classes, setClasses] = useState<ClassItem[]>(starterClasses);
   const [showCreate, setShowCreate] = useState(false);
@@ -141,6 +392,7 @@ export function ClassroomApp() {
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [quizResult, setQuizResult] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [showProfile, setShowProfile] = useState(false);
 
   const nav = role === "faculty" ? facultyNav : studentNav;
 
@@ -168,13 +420,6 @@ export function ClassroomApp() {
     if (!query) return classes;
     return classes.filter((item) => `${item.code} ${item.name} ${item.section}`.toLowerCase().includes(query));
   }, [classes, search]);
-
-  function switchRole(nextRole: Role) {
-    setRole(nextRole);
-    setView("overview");
-    setSearch("");
-    setToast(nextRole === "faculty" ? "Faculty workspace ready." : "Student workspace ready.");
-  }
 
   function navigate(nextView: View) {
     setView(nextView);
@@ -234,6 +479,23 @@ export function ClassroomApp() {
     );
     setQuizResult(correct);
     setToast(`Quiz submitted — ${correct}/${quizQuestions.length} correct.`);
+  }
+
+  async function resetStudentDevice(userId: string) {
+    const response = await fetch("/api/auth/faculty-reset-device", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-eduassist-device-id": deviceId,
+      },
+      body: JSON.stringify({ userId }),
+    });
+    const result = (await response.json()) as { displayName?: string; message?: string };
+    setToast(
+      response.ok
+        ? `${result.displayName ?? userId}'s registered device was released.`
+        : result.message ?? "The device could not be reset.",
+    );
   }
 
   const pageTitle = nav.find((item) => item.id === view)?.label || "Overview";
@@ -296,16 +558,13 @@ export function ClassroomApp() {
             />
             <kbd>⌘ K</kbd>
           </label>
-          <div className="role-switch" aria-label="Preview role">
-            <button className={role === "faculty" ? "selected" : ""} onClick={() => switchRole("faculty")}>Faculty</button>
-            <button className={role === "student" ? "selected" : ""} onClick={() => switchRole("student")}>Student</button>
-          </div>
+          <span className="device-status"><i /> Device registered</span>
           <button className="icon-button" onClick={() => setShowNotifications((current) => !current)} aria-label="Notifications">
             ♢<span />
           </button>
-          <button className="profile-button" onClick={() => setToast("Signed in as Dr. Maya Kapoor.")} aria-label="Open profile">
-            <span className="avatar">MK</span>
-            <span className="profile-copy"><b>{role === "faculty" ? "Dr. Maya Kapoor" : "Aarav Sharma"}</b><small>{role === "faculty" ? "Faculty" : "22CS001"}</small></span>
+          <button className="profile-button" onClick={() => setShowProfile((current) => !current)} aria-label="Open account menu" aria-expanded={showProfile}>
+            <span className="avatar">{initials(user.displayName)}</span>
+            <span className="profile-copy"><b>{user.displayName}</b><small>{role === "faculty" ? "Faculty" : user.userId}</small></span>
             <span className="chevron">⌄</span>
           </button>
           {showNotifications ? (
@@ -314,6 +573,18 @@ export function ClassroomApp() {
               <p><i className="dot mint" /> 39 students marked present.</p>
               <p><i className="dot yellow" /> Quiz 4 is ready for review.</p>
               <p><i className="dot blue" /> AI summary completed.</p>
+            </div>
+          ) : null}
+          {showProfile ? (
+            <div className="account-popover">
+              <div className="account-heading">
+                <span className="avatar">{initials(user.displayName)}</span>
+                <div><b>{user.displayName}</b><p>{user.userId} · {role === "faculty" ? "Faculty" : "Student"}</p></div>
+              </div>
+              <div className="registered-device-card"><span>✓</span><div><b>Registered device</b><p>{user.deviceLabel}</p><small>Bound {formatRegisteredDate(user.deviceRegisteredAt)}</small></div></div>
+              <p className="device-help">To move this account, release it here before signing in on the new device.</p>
+              <button className="account-action" onClick={() => void onReleaseDevice()}><span>⇄</span> Release this device</button>
+              <button className="account-action signout" onClick={() => void onSignOut()}><span>↪</span> Sign out</button>
             </div>
           ) : null}
         </header>
@@ -380,7 +651,7 @@ export function ClassroomApp() {
               }}
             />
           ) : null}
-          {view === "students" ? <StudentsView /> : null}
+          {view === "students" ? <StudentsView onResetDevice={resetStudentDevice} /> : null}
           {view === "analytics" ? <AnalyticsView role={role} /> : null}
         </div>
       </main>
@@ -649,9 +920,9 @@ function QuizzesView({ role, published, answers, result, onAnswer, onSubmit, onG
   );
 }
 
-function StudentsView() {
+function StudentsView({ onResetDevice }: { onResetDevice: (userId: string) => void }) {
   return (
-    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">CS301 · SECTION A</span><h2>Student roster</h2><p>Track attendance and quiz performance for 42 enrolled learners.</p></div><button className="button primary">＋ Add student</button></div><div className="panel data-panel"><div className="table-toolbar"><div className="mini-search">⌕ <input placeholder="Search student or roll number" /></div><button className="button outline">Export CSV ↓</button></div><div className="student-table"><div className="table-row table-head"><span>Student</span><span>Roll number</span><span>Attendance</span><span>Quiz average</span><span>Status</span><span /></div>{students.map((student, index) => <div className="table-row" key={student[1]}><span className="student-cell"><i className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</i><b>{student[0]}</b></span><span>{student[1]}</span><span><b>{student[2]}</b></span><span><b>{student[3]}%</b></span><span><i className={Number.parseInt(student[2]) > 85 ? "status-dot good" : "status-dot watch"} />{Number.parseInt(student[2]) > 85 ? "On track" : "Needs attention"}</span><button>•••</button></div>)}</div></div></section>
+    <section className="page-stack"><div className="section-title-row"><div><span className="eyebrow">CS301 · SECTION A</span><h2>Student roster</h2><p>Track attendance, performance, and registered student devices.</p></div><button className="button primary">＋ Add student</button></div><div className="panel data-panel"><div className="table-toolbar"><div className="mini-search">⌕ <input placeholder="Search student or roll number" /></div><button className="button outline">Export CSV ↓</button></div><div className="student-table"><div className="table-row table-head"><span>Student</span><span>Roll number</span><span>Attendance</span><span>Quiz average</span><span>Status</span><span>Device</span></div>{students.map((student, index) => { const deviceUserId = index === 0 ? "STU001" : index === 1 ? "STU002" : null; return <div className="table-row" key={student[1]}><span className="student-cell"><i className={`student-avatar a${index}`}>{student[0].split(" ").map((word) => word[0]).join("")}</i><b>{student[0]}</b></span><span>{student[1]}</span><span><b>{student[2]}</b></span><span><b>{student[3]}%</b></span><span><i className={Number.parseInt(student[2]) > 85 ? "status-dot good" : "status-dot watch"} />{Number.parseInt(student[2]) > 85 ? "On track" : "Needs attention"}</span>{deviceUserId ? <button className="device-reset-button" onClick={() => onResetDevice(deviceUserId)}>Release</button> : <span className="device-unmanaged">Not linked</span>}</div>; })}</div></div></section>
   );
 }
 
