@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     return Response.json({ message: "Enter your user ID and password." }, { status: 400 });
   }
 
-  const role = body.role === "admin" || body.role === "faculty" || body.role === "student" ? (body.role as AuthRole) : null;
+  const role = body.role === "faculty" || body.role === "student" ? (body.role as AuthRole) : null;
   if (!role || typeof body.userId !== "string" || typeof body.password !== "string" || typeof body.deviceId !== "string") {
     return Response.json({ message: "Complete all login fields." }, { status: 400 });
   }

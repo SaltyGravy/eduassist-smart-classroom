@@ -203,6 +203,14 @@ async function initializeAuthSchema() {
       db.prepare("INSERT INTO auth_system_flags (key, value) VALUES ('student_only_device_policy_v1', 'device binding limited to students')"),
     ]);
   }
+
+  const adminBridgeFlag = await db.prepare("SELECT key FROM auth_system_flags WHERE key = 'admin_bridge_only_v1'").first();
+  if (!adminBridgeFlag) {
+    await db.batch([
+      db.prepare("DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM auth_users WHERE is_admin = 1)"),
+      db.prepare("INSERT INTO auth_system_flags (key, value) VALUES ('admin_bridge_only_v1', 'browser admin sessions moved to private site')"),
+    ]);
+  }
 }
 
 async function getAuthDb() {
@@ -491,9 +499,38 @@ export async function changeOwnPassword(request: Request, newPassword: string) {
 }
 
 async function getAdminSession(request: Request) {
+  if (await isAdminBridgeRequest(request)) {
+    const actorUserId = normalizeUserId(request.headers.get("x-eduassist-admin-id") ?? "");
+    const db = await getAuthDb();
+    const row = await db.prepare("SELECT * FROM auth_users WHERE user_id = ? AND is_admin = 1 AND status = 'active'").bind(actorUserId).first() as UserRow | null;
+    if (!row || row.must_change_password) return null;
+    return { user: publicUser(row), userRow: row, tokenHash: "admin-bridge" };
+  }
   const session = await getSession(request);
   if (!session || session.user.role !== "admin" || session.user.mustChangePassword) return null;
   return session;
+}
+
+async function bridgeSecret() {
+  const { env } = await import("cloudflare:workers");
+  return typeof env.ADMIN_BRIDGE_SECRET === "string" ? env.ADMIN_BRIDGE_SECRET : "";
+}
+
+export async function isAdminBridgeRequest(request: Request) {
+  const configured = await bridgeSecret();
+  if (configured.length < 32) return false;
+  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  return timingSafeEqual(configured, supplied);
+}
+
+export async function verifyAdminCredentials(userIdInput: string, password: string) {
+  const db = await getAuthDb();
+  const userId = normalizeUserId(userIdInput);
+  const row = await db.prepare("SELECT * FROM auth_users WHERE user_id = ? AND is_admin = 1").bind(userId).first() as UserRow | null;
+  const suppliedHash = row ? await derivePassword(password, row.password_salt) : await derivePassword(password, "eduassist-invalid-admin-salt");
+  if (!row || row.status !== "active" || row.must_change_password || !timingSafeEqual(suppliedHash, row.password_hash)) return null;
+  await recordAudit(db, row.user_id, "admin_bridge_login", row.user_id, "Private administration site");
+  return { userId: row.user_id, displayName: row.display_name };
 }
 
 export async function listManagedUsers(request: Request) {

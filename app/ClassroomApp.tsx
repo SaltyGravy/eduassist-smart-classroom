@@ -201,14 +201,14 @@ function LoginScreen({
 
       <section className="login-panel-wrap">
         <div className="login-panel">
-          <div className="login-heading"><span className="eyebrow">SECURE ACCESS</span><h2>Welcome back</h2><p>Select your role and sign in with your project account.</p></div>
+          <div className="login-heading"><span className="eyebrow">SECURE ACCESS</span><h2>Welcome back</h2><p>Select your account type and sign in.</p></div>
 
           {notice ? <div className="auth-message success"><span>✓</span><p>{notice}</p></div> : null}
           {error ? <div className={deviceBlocked ? "auth-message blocked" : "auth-message error"}><span>{deviceBlocked ? "⌁" : "!"}</span><div><b>{deviceBlocked ? "Registered on another device" : "Unable to sign in"}</b><p>{error}</p></div></div> : null}
 
           <form onSubmit={submitLogin} className="login-form">
             <fieldset className="login-role-picker">
-              <legend>Choose workspace</legend>
+              <legend>Choose account type</legend>
               <div>
                 <button type="button" className={role === "faculty" ? "active" : ""} onClick={() => chooseRole("faculty")}><span>♙</span><b>Faculty</b><small>Manage classes</small></button>
                 <button type="button" className={role === "student" ? "active" : ""} onClick={() => chooseRole("student")}><span>▤</span><b>Student</b><small>Learn & respond</small></button>
@@ -324,10 +324,7 @@ export function ClassroomApp() {
         });
         if (!response.ok) throw new Error("No active session");
         const { user } = (await response.json()) as { user: AuthUser };
-        if (user.role === "admin") {
-          window.location.replace("/admin");
-          return;
-        }
+        if (user.role === "admin") throw new Error("Administrator sessions use the private administration site.");
         setAuthState({ status: "authenticated", user });
       } catch {
         setAuthState({ status: "guest" });
@@ -545,7 +542,7 @@ function AuthenticatedClassroom({
             EduAssist
           </div>
           <div className="page-heading">
-            <span>{role === "faculty" ? "Faculty workspace" : "Student workspace"}</span>
+            <span>{role === "faculty" ? "Faculty portal" : "Student portal"}</span>
             <h1>{pageTitle}</h1>
           </div>
           <label className="search-box">

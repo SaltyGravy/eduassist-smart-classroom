@@ -14,6 +14,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  vars: process.env.ADMIN_BRIDGE_SECRET ? { ADMIN_BRIDGE_SECRET: process.env.ADMIN_BRIDGE_SECRET } : {},
   d1_databases: d1
     ? [
         {
