@@ -40,7 +40,7 @@ administrator can release somebody else's device for recovery.
 - Read-only audit history for login, device, password, and account actions
 - Persistent faculty classes with unique student join codes
 - Faculty roster management using existing student user IDs
-- Two-to-five-minute QR attendance sessions with live check-ins and a manual-code fallback
+- Two-to-five-minute QR attendance sessions with native or bundled cross-browser camera decoding and a manual-code fallback
 - Enrolment, session-expiry, duplicate-submission, and class-membership checks on the server
 - Automatic absent records when a session closes, plus faculty corrections for present/late/absent
 - Faculty and student attendance reports with per-session history, percentages, and CSV export

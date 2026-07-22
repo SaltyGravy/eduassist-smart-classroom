@@ -1,6 +1,7 @@
 "use client";
 
 import QRCode from "qrcode";
+import jsQR from "jsqr";
 import Image from "next/image";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
@@ -209,6 +210,8 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanningRef = useRef(false);
+  const scanFrameRef = useRef<number | null>(null);
+  const lastSoftwareScanRef = useRef(0);
   const selected = classes.find((item) => item.id === selectedClassId) ?? classes[0] ?? null;
   const activeSessionId = attendanceSession?.id;
   const activeSessionStatus = attendanceSession?.status;
@@ -263,6 +266,7 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
 
   useEffect(() => () => {
     scanningRef.current = false;
+    if (scanFrameRef.current !== null) window.cancelAnimationFrame(scanFrameRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
@@ -314,6 +318,8 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
 
   function stopCamera() {
     scanningRef.current = false;
+    if (scanFrameRef.current !== null) window.cancelAnimationFrame(scanFrameRef.current);
+    scanFrameRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setCameraActive(false);
@@ -334,23 +340,58 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
 
   async function startCamera() {
     setError(""); setMarkResult(null);
-    const Detector = (window as Window & { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
-    if (!Detector) { setError("QR camera scanning is not supported in this browser. Enter the session code instead."); return; }
     try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("camera-unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      const video = videoRef.current;
+      if (!video) throw new Error("video-unavailable");
+      video.srcObject = stream;
+      await video.play();
       setCameraActive(true); scanningRef.current = true;
-      const detector = new Detector({ formats: ["qr_code"] });
-      const scan = async () => {
+      const Detector = (window as Window & { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
+      let detector: InstanceType<BarcodeDetectorConstructor> | null = null;
+      try { detector = Detector ? new Detector({ formats: ["qr_code"] }) : null; } catch { detector = null; }
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("decoder-unavailable");
+
+      const scan = async (frameTime: number) => {
         if (!scanningRef.current || !videoRef.current) return;
+        let credential = "";
         try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes[0]?.rawValue) { await submitCredential(codes[0].rawValue); return; }
+          if (detector) {
+            const codes = await detector.detect(videoRef.current);
+            credential = codes[0]?.rawValue ?? "";
+          }
         } catch { /* Keep the camera open while frames become readable. */ }
-        if (scanningRef.current) window.requestAnimationFrame(() => { void scan(); });
+
+        if (!credential && frameTime - lastSoftwareScanRef.current >= 220 && videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          lastSoftwareScanRef.current = frameTime;
+          const sourceWidth = videoRef.current.videoWidth;
+          const sourceHeight = videoRef.current.videoHeight;
+          if (sourceWidth && sourceHeight) {
+            const scale = Math.min(1, 720 / sourceWidth);
+            canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+            canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+            context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+            credential = jsQR(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" })?.data ?? "";
+          }
+        }
+
+        if (credential) {
+          scanningRef.current = false;
+          const accepted = await submitCredential(credential);
+          if (!accepted && streamRef.current) {
+            scanningRef.current = true;
+            scanFrameRef.current = window.requestAnimationFrame((time) => { void scan(time); });
+          }
+          return;
+        }
+        if (scanningRef.current) scanFrameRef.current = window.requestAnimationFrame((time) => { void scan(time); });
       };
-      void scan();
+      scanFrameRef.current = window.requestAnimationFrame((time) => { void scan(time); });
     } catch { setError("Camera access was not available. Allow camera permission or use the session code."); stopCamera(); }
   }
 
