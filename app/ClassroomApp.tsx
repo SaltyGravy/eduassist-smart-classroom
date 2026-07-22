@@ -126,7 +126,7 @@ function AuthLoading() {
       <span className="brand-mark auth-brand-mark"><i /><i /><i /></span>
       <h1>Edu<span>Assist</span></h1>
       <div className="auth-loader"><i /><i /><i /></div>
-      <p>Securing your workspace…</p>
+      <p>Securing your portal…</p>
     </main>
   );
 }
@@ -189,7 +189,7 @@ function LoginScreen({
         <div className="login-story-copy">
           <span className="eyebrow light">PERSONAL COLLEGE PROJECT</span>
           <h1>One classroom.<br />Secure student access.</h1>
-          <p>Run faculty and student workspaces with rotating QR attendance and controlled student-device changes.</p>
+          <p>Run faculty and student portals with rotating QR attendance and controlled student-device changes.</p>
           <div className="security-points">
             <div><span>01</span><p><b>Faculty flexibility</b>Faculty can sign in without permanent device registration.</p></div>
             <div><span>02</span><p><b>Student registration</b>A student&apos;s first successful login binds the account to that browser installation.</p></div>
@@ -289,7 +289,7 @@ function PasswordChangeScreen({
         <div className="setup-progress"><i className="done" /><span /><i className="active" /><span /><i /></div>
         <span className="eyebrow">FIRST LOGIN · STEP 2 OF 3</span>
         <h1>Create your private password</h1>
-        <p className="setup-lead">Welcome, {user.displayName}. Replace the temporary password before opening your {user.role} workspace.</p>
+        <p className="setup-lead">Welcome, {user.displayName}. Replace the temporary password before opening your {user.role} portal.</p>
         <div className="setup-device-card"><span>✓</span><div><b>{user.role === "student" ? "Student device registered successfully" : "Secure session verified"}</b><p>{user.role === "student" ? user.deviceLabel : "No permanent device registration is used for this account."}</p></div></div>
         {error ? <div className="auth-message error"><span>!</span><div><b>Password not changed</b><p>{error}</p></div></div> : null}
         <form className="password-setup-form" onSubmit={changePassword}>
@@ -505,7 +505,7 @@ function AuthenticatedClassroom({
           <span>Edu<span>Assist</span></span>
         </button>
 
-        <div className="workspace-label">WORKSPACE</div>
+        <div className="workspace-label">CLASSROOM</div>
         <nav className="primary-nav" aria-label="Main navigation">
           {nav.map((item) => (
             <button
@@ -551,7 +551,7 @@ function AuthenticatedClassroom({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search classes, notes, quizzes..."
-              aria-label="Search workspace"
+              aria-label="Search classroom"
             />
             <kbd>⌘ K</kbd>
           </label>
@@ -647,7 +647,7 @@ function AuthenticatedClassroom({
         <div className="modal-backdrop" onMouseDown={() => setShowCreate(false)}>
           <div className="modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-title">
             <div className="modal-header">
-              <div><span className="eyebrow">NEW WORKSPACE</span><h2 id="create-title">Create a class</h2></div>
+              <div><span className="eyebrow">NEW CLASS</span><h2 id="create-title">Create a class</h2></div>
               <button onClick={() => setShowCreate(false)} aria-label="Close">×</button>
             </div>
             <form onSubmit={createClass}>
@@ -706,7 +706,7 @@ function FacultyOverview({
 
         <div className="panel attendance-chart-panel">
           <PanelHeader eyebrow="THIS WEEK" title="Attendance overview" action="View report" onAction={() => onNavigate("analytics")} />
-          <div className="chart-top"><div><b>{classes.length ? "Ready" : "—"}</b><span>reporting status</span></div><span className="trend-pill">D1 verified</span></div>
+          <div className="chart-top"><div><b>{classes.length ? "Ready" : "—"}</b><span>reporting status</span></div><span className="trend-pill">Database verified</span></div>
           <div className="attendance-chart">
             {[0, 0, 0, 0, 0].map((height, index) => (
               <div className="bar-column" key={height + index}><div className="bar-track"><i style={{ height: `${height}%` }} className={index === 4 ? "current" : ""} /></div><span>{["Mon", "Tue", "Wed", "Thu", "Fri"][index]}</span></div>

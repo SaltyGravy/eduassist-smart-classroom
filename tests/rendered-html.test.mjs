@@ -1,40 +1,19 @@
 import assert from "node:assert/strict";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(pathname = "/") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request(`http://localhost${pathname}`, {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-}
-
-test("server-renders the protected EduAssist entry point", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, /<title>EduAssist — AI Smart Classroom<\/title>/i);
-  assert.match(html, /Securing your workspace/i);
-  assert.doesNotMatch(html, /Good morning, Dr\. Kapoor|Start attendance/i);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
+test("keeps the public entry point limited to faculty and students", async () => {
+  const [layout, classroom] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ClassroomApp.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(layout, /EduAssist — AI Smart Classroom/);
+  assert.match(layout, /faculty and student portal/i);
+  assert.match(classroom, /Securing your portal/i);
+  assert.match(classroom, /Choose account type/i);
+  assert.doesNotMatch(classroom, /value="admin"|Choose workspace/i);
 });
 
-test("does not expose an administrator page on the public site", async () => {
-  const response = await render("/admin");
-  assert.equal(response.status, 404);
+test("does not contain an administrator page in the public app", async () => {
+  await assert.rejects(access(new URL("../app/admin/page.tsx", import.meta.url)));
 });

@@ -1,4 +1,5 @@
 import { getAppDatabase, getAuthorizedSession } from "./auth";
+import type { AppDatabase } from "../../db/client";
 
 export type ClassroomRole = "faculty" | "student";
 export type AttendanceStatus = "present" | "late" | "absent";
@@ -158,11 +159,11 @@ function mapClass(row: ClassRow): ClassroomSummary {
   };
 }
 
-async function getOwnedClass(db: D1Database, classId: number, facultyUserId: number) {
+async function getOwnedClass(db: AppDatabase, classId: number, facultyUserId: number) {
   return db.prepare("SELECT * FROM classroom_classes WHERE id = ? AND faculty_user_id = ? AND status = 'active'").bind(classId, facultyUserId).first();
 }
 
-async function finalizeSession(db: D1Database, sessionId: number) {
+async function finalizeSession(db: AppDatabase, sessionId: number) {
   await db.batch([
     db.prepare("UPDATE attendance_sessions SET status = 'closed', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP) WHERE id = ?").bind(sessionId),
     db.prepare(`INSERT INTO attendance_records (session_id, student_user_id, status, source)
@@ -175,7 +176,7 @@ async function finalizeSession(db: D1Database, sessionId: number) {
   ]);
 }
 
-async function finalizeExpiredSessions(db: D1Database, classId?: number) {
+async function finalizeExpiredSessions(db: AppDatabase, classId?: number) {
   const statement = classId
     ? db.prepare("SELECT id FROM attendance_sessions WHERE class_id = ? AND status = 'active' AND expires_at <= CURRENT_TIMESTAMP").bind(classId)
     : db.prepare("SELECT id FROM attendance_sessions WHERE status = 'active' AND expires_at <= CURRENT_TIMESTAMP");
@@ -339,7 +340,7 @@ async function publicAttendanceSession(row: SessionRow) {
   };
 }
 
-async function readSessionRow(db: D1Database, sessionId: number) {
+async function readSessionRow(db: AppDatabase, sessionId: number) {
   return (await db.prepare(`SELECT s.*, c.subject_name, c.subject_code, c.semester, c.section
     FROM attendance_sessions s JOIN classroom_classes c ON c.id = s.class_id WHERE s.id = ?`).bind(sessionId).first()) as SessionRow | null;
 }

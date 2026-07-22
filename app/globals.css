@@ -1119,7 +1119,7 @@ label:focus-within {
 .toast span { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: white; background: var(--mint); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }
 
-/* Administrator workspace */
+/* Legacy administration styles retained for layout compatibility */
 .admin-shell { min-height: 100vh; background: radial-gradient(circle at 91% 2%,rgba(120,153,212,.14),transparent 28rem),var(--cream); }
 .admin-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; display: flex; width: 250px; flex-direction: column; padding: 27px 19px 21px; color: white; background: radial-gradient(circle at 20% 85%,rgba(121,185,165,.16),transparent 17rem),linear-gradient(165deg,#252d5c,#20264d); }
 .admin-brand { display: flex; align-items: center; gap: 11px; padding: 0 7px 23px; border: 0; color: white; background: transparent; font-size: 21px; font-weight: 750; cursor: pointer; }

@@ -1,74 +1,65 @@
-# EduAssist
+# EduAssist Smart Classroom
 
-EduAssist is an interactive smart-classroom workspace with separate administrator,
-faculty, and student experiences. It brings account administration,
-device-registered access, persistent class management, secure QR attendance, and
-verified attendance reporting into one calm, responsive interface.
+The public Faculty and Student portal for EduAssist. It is a standard Next.js
+application prepared for Vercel and backed by Turso serverless SQLite.
 
-## Prerequisites
+The administrator interface is intentionally a separate application in
+`admin-site/`; it is not linked from this public portal.
 
-- Node.js `>=22.13.0`
+## Local development
 
-## Run locally
+1. Copy `.env.example` to `.env.local`.
+2. Use a local SQLite URL such as `file:./data/eduassist.db`, or provide Turso
+   credentials.
+3. Install and start the app:
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and use the role switcher on
-the secure login screen. The one-time administrator credential is provided during
-deployment handoff and is never displayed on the public login page.
+Required production variables:
 
-## Administrator onboarding
+```text
+TURSO_DATABASE_URL
+TURSO_AUTH_TOKEN
+ADMIN_BRIDGE_SECRET
+```
 
-1. Sign in to the **Admin** workspace with the bootstrap account.
-2. The first login binds the account to that browser.
-3. Replace the temporary password before the dashboard opens.
-4. Create faculty and student accounts and share their temporary credentials privately.
+`ADMIN_BRIDGE_SECRET` must contain at least 32 random characters and must match
+the value configured on the private admin project.
 
-The first successful login for every account registers it to the current browser
-installation. Users can release their own device from their account menu. Only the
-administrator can release somebody else's device for recovery.
+## Database migration
+
+The migration commands are designed to preserve users, password hashes, audit
+history, classes, enrolments, attendance sessions, reports, and the six-month
+student device-change history.
+
+```bash
+pnpm db:export-live -- data/eduassist-migration.snapshot.json
+pnpm db:import-snapshot -- data/eduassist-migration.snapshot.json
+pnpm db:verify
+```
+
+The import deliberately invalidates old-domain sessions and clears only the
+current student browser registration. Students register their browser again on
+the Vercel domain without consuming a device change.
 
 ## Included workflows
 
-- Faculty overview with schedules, metrics, quick actions, and engagement trends
-- Administrator dashboard for account creation, suspension, password reset, and recovery
-- PBKDF2 password hashing, forced first-login password changes, and seven-day sessions
-- One-device account binding with second-device blocking and controlled release
-- Read-only audit history for login, device, password, and account actions
-- Persistent faculty classes with unique student join codes
-- Faculty roster management using existing student user IDs
-- Two-to-five-minute QR attendance sessions with native or bundled cross-browser camera decoding and a manual-code fallback
-- Enrolment, session-expiry, duplicate-submission, and class-membership checks on the server
-- Automatic absent records when a session closes, plus faculty corrections for present/late/absent
-- Faculty and student attendance reports with per-session history, percentages, and CSV export
-- Mobile navigation and responsive views for smaller screens
+- Faculty and student accounts with forced first-login password changes
+- Student-only device registration and second-device blocking
+- Two device changes in a rolling six-month window
+- Faculty classes, join codes, roster management, and enrolment checks
+- Ten-second rotating QR attendance with a manual-code fallback
+- Attendance corrections, student reports, faculty reports, and CSV export
+- Protected server bridge for the separate administrator application
 
-Authentication, classes, enrolments, attendance sessions, check-ins, and reports
-are persisted in D1. The Notes & AI Summary and Quiz sections are interface previews
-reserved for the next project phase; they do not yet upload files, call an AI model,
-or save generated content. Configure R2 storage and an AI provider before enabling
-those workflows in production.
+Notes uploads, AI summaries, and AI quizzes remain reserved for the next phase.
 
-## Attendance workflow
-
-1. The administrator creates the faculty and student accounts.
-2. Faculty creates a class and shares its seven-character join code, or adds a student by user ID.
-3. Faculty opens **Attendance**, chooses a two-to-five-minute duration, and generates the secure QR.
-4. An enrolled student scans the QR from their registered device or enters its fallback code.
-5. Faculty watches the roster update, closes the session, and corrects exceptions if needed.
-6. Both roles open **Reports** to review the saved results or export CSV.
-
-The browser model intentionally uses a random installation identifier rather
-than hardware IMEI data, which browsers do not safely expose. A future native
-mobile client can add Android Play Integrity or iOS App Attest verification.
-
-## Commands
+## Verification
 
 ```bash
-pnpm dev       # development server
-pnpm build     # production build
-pnpm test      # build and rendered-output checks
+pnpm lint
+pnpm test
 ```

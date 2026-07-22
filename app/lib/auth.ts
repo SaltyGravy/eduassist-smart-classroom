@@ -1,3 +1,5 @@
+import { getDatabase, type AppDatabase } from "../../db/client";
+
 export type AuthRole = "admin" | "faculty" | "student";
 type StoredRole = "faculty" | "student";
 
@@ -70,14 +72,12 @@ const encoder = new TextEncoder();
 let schemaPromise: Promise<void> | null = null;
 
 async function getBinding() {
-  const { env } = await import("cloudflare:workers");
-  if (!env.DB) throw new Error("EduAssist authentication requires the D1 `DB` binding.");
-  return env.DB;
+  return getDatabase();
 }
 
-async function addMissingUserColumns(db: D1Database) {
-  const info = await db.prepare("PRAGMA table_info(auth_users)").all();
-  const columns = new Set((info.results ?? []).map((row: { name: string }) => row.name));
+async function addMissingUserColumns(db: AppDatabase) {
+  const info = await db.prepare("PRAGMA table_info(auth_users)").all<{ name: string }>();
+  const columns = new Set(info.results.map((row) => row.name));
   const additions = [
     ["is_admin", "ALTER TABLE auth_users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"],
     ["status", "ALTER TABLE auth_users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"],
@@ -295,7 +295,7 @@ function deviceChangeState(used = 0, oldest: string | null = null): DeviceChange
   };
 }
 
-async function readDeviceChangeState(db: D1Database, userDatabaseId: number) {
+async function readDeviceChangeState(db: AppDatabase, userDatabaseId: number) {
   const row = await db.prepare(`SELECT COUNT(*) AS used, MIN(created_at) AS oldest
     FROM auth_device_changes WHERE user_id = ? AND created_at >= datetime('now', '-6 months')`).bind(userDatabaseId).first() as { used: number; oldest: string | null };
   return deviceChangeState(Number(row?.used ?? 0), row?.oldest ?? null);
@@ -369,7 +369,7 @@ function validatePassword(password: string) {
   return null;
 }
 
-async function recordAudit(db: D1Database, actorUserId: string, action: string, targetUserId: string, detail = "") {
+async function recordAudit(db: AppDatabase, actorUserId: string, action: string, targetUserId: string, detail = "") {
   await db
     .prepare("INSERT INTO auth_audit_log (actor_user_id, action, target_user_id, detail) VALUES (?, ?, ?, ?)")
     .bind(actorUserId, action, targetUserId, detail.slice(0, 240))
@@ -392,7 +392,7 @@ export async function loginWithDevice({ request, userId, password, role, deviceI
   const suppliedHash = row ? await derivePassword(password, row.password_salt) : await derivePassword(password, "eduassist-invalid-user-salt");
 
   if (!row || roleForRow(row) !== role || !timingSafeEqual(suppliedHash, row.password_hash)) {
-    return { ok: false as const, status: 401, code: "INVALID_CREDENTIALS", message: "The user ID or password is incorrect for this workspace." };
+    return { ok: false as const, status: 401, code: "INVALID_CREDENTIALS", message: "The user ID or password is incorrect for this portal." };
   }
   if (row.status !== "active") {
     await recordAudit(db, row.user_id, "login_blocked", row.user_id, "Account suspended");
@@ -512,8 +512,7 @@ async function getAdminSession(request: Request) {
 }
 
 async function bridgeSecret() {
-  const { env } = await import("cloudflare:workers");
-  return typeof env.ADMIN_BRIDGE_SECRET === "string" ? env.ADMIN_BRIDGE_SECRET : "";
+  return process.env.ADMIN_BRIDGE_SECRET ?? "";
 }
 
 export async function isAdminBridgeRequest(request: Request) {

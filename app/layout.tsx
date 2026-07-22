@@ -4,7 +4,7 @@ import "./globals.css";
 
 const title = "EduAssist — AI Smart Classroom";
 const description =
-  "A secure faculty and student workspace with rotating QR attendance, student device controls, and progress reports.";
+  "A secure faculty and student portal with rotating QR attendance, student device controls, and progress reports.";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
