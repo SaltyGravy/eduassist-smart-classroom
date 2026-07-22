@@ -1,17 +1,19 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AdminPanel } from "./AdminPanel";
 import { LiveAttendanceView, LiveClassesView, LiveReportsView, LiveRosterView, type LiveClass } from "./ClassroomModules";
 
 type Role = "faculty" | "student";
-type AccountRole = "admin" | Role;
 type AuthUser = {
   userId: string;
   displayName: string;
-  role: AccountRole;
+  role: "admin" | Role;
   deviceLabel: string;
   deviceRegisteredAt: string;
+  deviceBound: boolean;
+  deviceChangesUsed: number;
+  deviceChangesRemaining: number;
+  deviceChangeWindowEnds: string | null;
   mustChangePassword: boolean;
 };
 
@@ -138,8 +140,8 @@ function LoginScreen({
   notice: string;
   onAuthenticated: (result: LoginResult) => void;
 }) {
-  const [role, setRole] = useState<AccountRole>("admin");
-  const [userId, setUserId] = useState("ADM001");
+  const [role, setRole] = useState<Role>("faculty");
+  const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -147,9 +149,9 @@ function LoginScreen({
   const [deviceBlocked, setDeviceBlocked] = useState(false);
   const deviceLabel = useMemo(() => describeCurrentDevice(), []);
 
-  function chooseRole(nextRole: AccountRole) {
+  function chooseRole(nextRole: Role) {
     setRole(nextRole);
-    setUserId(nextRole === "admin" ? "ADM001" : "");
+    setUserId("");
     setPassword("");
     setError("");
     setDeviceBlocked(false);
@@ -186,15 +188,15 @@ function LoginScreen({
         <div className="login-brand"><span className="brand-mark"><i /><i /><i /></span><b>Edu<span>Assist</span></b></div>
         <div className="login-story-copy">
           <span className="eyebrow light">PERSONAL COLLEGE PROJECT</span>
-          <h1>One classroom.<br />One trusted device.</h1>
-          <p>Run a secure faculty and student workspace with an administrator account you control.</p>
+          <h1>One classroom.<br />Secure student access.</h1>
+          <p>Run faculty and student workspaces with rotating QR attendance and controlled student-device changes.</p>
           <div className="security-points">
-            <div><span>01</span><p><b>Self-managed access</b>Create faculty and student accounts from your administrator workspace.</p></div>
-            <div><span>02</span><p><b>First-login registration</b>The first successful login binds the account to this browser installation.</p></div>
-            <div><span>03</span><p><b>Controlled device change</b>Release the old device before registering a new one, inspired by UTS handset binding.</p></div>
+            <div><span>01</span><p><b>Faculty flexibility</b>Faculty can sign in without permanent device registration.</p></div>
+            <div><span>02</span><p><b>Student registration</b>A student&apos;s first successful login binds the account to that browser installation.</p></div>
+            <div><span>03</span><p><b>Controlled change</b>Students can change devices twice in a rolling six-month window.</p></div>
           </div>
         </div>
-        <p className="login-story-foot">Protected sessions · Password hashing · Device-bound access</p>
+        <p className="login-story-foot">Protected sessions · Password hashing · Rotating attendance QR</p>
       </section>
 
       <section className="login-panel-wrap">
@@ -208,23 +210,22 @@ function LoginScreen({
             <fieldset className="login-role-picker">
               <legend>Choose workspace</legend>
               <div>
-                <button type="button" className={role === "admin" ? "active" : ""} onClick={() => chooseRole("admin")}><span>⚙</span><b>Admin</b><small>Control access</small></button>
                 <button type="button" className={role === "faculty" ? "active" : ""} onClick={() => chooseRole("faculty")}><span>♙</span><b>Faculty</b><small>Manage classes</small></button>
                 <button type="button" className={role === "student" ? "active" : ""} onClick={() => chooseRole("student")}><span>▤</span><b>Student</b><small>Learn & respond</small></button>
               </div>
             </fieldset>
 
-            <label className="auth-field"><span>User ID</span><div><i>⌁</i><input value={userId} onChange={(event) => setUserId(event.target.value.toUpperCase())} autoComplete="username" required placeholder={role === "admin" ? "ADM001" : role === "faculty" ? "FAC001" : "STU001"} /></div></label>
+            <label className="auth-field"><span>User ID</span><div><i>⌁</i><input value={userId} onChange={(event) => setUserId(event.target.value.toUpperCase())} autoComplete="username" required placeholder={role === "faculty" ? "FAC001" : "STU001"} /></div></label>
             <label className="auth-field"><span>Password</span><div><i>•</i><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? "Hide" : "Show"}</button></div></label>
 
-            <div className="device-registration-preview"><span className="device-preview-icon">▣</span><div><b>This device will be verified</b><p>{deviceLabel}</p><small>A secure installation ID is used—never your IMEI or personal files.</small></div><i className="device-ready">READY</i></div>
+            {role === "student" ? <div className="device-registration-preview"><span className="device-preview-icon">▣</span><div><b>This student device will be verified</b><p>{deviceLabel}</p><small>Students may change device twice in six months. No IMEI or personal files are accessed.</small></div><i className="device-ready">READY</i></div> : <div className="device-registration-preview faculty"><span className="device-preview-icon">✓</span><div><b>No permanent device registration</b><p>{deviceLabel}</p><small>This browser is used only to protect the current faculty session.</small></div><i className="device-ready">SESSION</i></div>}
 
-            <button className="button primary auth-submit" type="submit" disabled={submitting || !deviceId}>{submitting ? "Verifying device…" : "Login securely"}<span>→</span></button>
+            <button className="button primary auth-submit" type="submit" disabled={submitting || !deviceId}>{submitting ? "Signing in…" : "Login securely"}<span>→</span></button>
           </form>
 
           <div className="account-issued-note"><span>⌾</span><p><b>Accounts are issued by your administrator.</b><br />Use the user ID and temporary password shared with you. You will create a private password on first login.</p></div>
 
-          <p className="auth-disclaimer">Web browsers cannot safely expose hardware IMEI values. This model uses a privacy-safe browser installation ID; a future native Android/iOS app can add device attestation.</p>
+          <p className="auth-disclaimer">Student binding uses a privacy-safe browser installation ID. Web browsers do not expose hardware IMEI values.</p>
         </div>
       </section>
     </main>
@@ -288,8 +289,8 @@ function PasswordChangeScreen({
         <div className="setup-progress"><i className="done" /><span /><i className="active" /><span /><i /></div>
         <span className="eyebrow">FIRST LOGIN · STEP 2 OF 3</span>
         <h1>Create your private password</h1>
-        <p className="setup-lead">Welcome, {user.displayName}. Your device is now registered. Replace the temporary password before opening your {user.role} workspace.</p>
-        <div className="setup-device-card"><span>✓</span><div><b>Device registered successfully</b><p>{user.deviceLabel}</p></div></div>
+        <p className="setup-lead">Welcome, {user.displayName}. Replace the temporary password before opening your {user.role} workspace.</p>
+        <div className="setup-device-card"><span>✓</span><div><b>{user.role === "student" ? "Student device registered successfully" : "Secure session verified"}</b><p>{user.role === "student" ? user.deviceLabel : "No permanent device registration is used for this account."}</p></div></div>
         {error ? <div className="auth-message error"><span>!</span><div><b>Password not changed</b><p>{error}</p></div></div> : null}
         <form className="password-setup-form" onSubmit={changePassword}>
           <label className="auth-field"><span>New password</span><div><i>•</i><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required autoFocus /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? "Hide" : "Show"}</button></div></label>
@@ -323,6 +324,10 @@ export function ClassroomApp() {
         });
         if (!response.ok) throw new Error("No active session");
         const { user } = (await response.json()) as { user: AuthUser };
+        if (user.role === "admin") {
+          window.location.replace("/admin");
+          return;
+        }
         setAuthState({ status: "authenticated", user });
       } catch {
         setAuthState({ status: "guest" });
@@ -336,7 +341,7 @@ export function ClassroomApp() {
       method: "POST",
       headers: { "x-eduassist-device-id": deviceId },
     }).catch(() => null);
-    setAuthNotice("You have signed out. This browser remains registered to the account.");
+    setAuthNotice("You have signed out securely.");
     setAuthState({ status: "guest" });
   }
 
@@ -345,7 +350,8 @@ export function ClassroomApp() {
       method: "POST",
       headers: { "x-eduassist-device-id": deviceId },
     });
-    if (!response.ok) throw new Error("The registered device could not be released.");
+    const result = (await response.json().catch(() => ({}))) as { message?: string };
+    if (!response.ok) throw new Error(result.message ?? "The registered device could not be released.");
     setAuthNotice("Device released. The next successful login will register a new browser.");
     setAuthState({ status: "guest" });
   }
@@ -368,9 +374,7 @@ export function ClassroomApp() {
     return <PasswordChangeScreen user={authState.user} deviceId={deviceId} onChanged={(user) => setAuthState({ status: "authenticated", user })} onSignOut={signOut} />;
   }
 
-  if (authState.user.role === "admin") {
-    return <AdminPanel user={authState.user as AuthUser & { role: "admin" }} deviceId={deviceId} onSignOut={signOut} onReleaseDevice={releaseDevice} />;
-  }
+  if (authState.user.role === "admin") return <AuthLoading />;
 
   return (
     <AuthenticatedClassroom
@@ -467,6 +471,14 @@ function AuthenticatedClassroom({
     }
   }
 
+  async function releaseStudentDevice() {
+    try {
+      await onReleaseDevice();
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : "The registered device could not be released.");
+    }
+  }
+
   function generateSummary() {
     setSummaryLoading(true);
     setSummaryReady(false);
@@ -546,7 +558,7 @@ function AuthenticatedClassroom({
             />
             <kbd>⌘ K</kbd>
           </label>
-          <span className="device-status"><i /> Device registered</span>
+          <span className="device-status"><i /> {role === "student" ? "Student device registered" : "Secure faculty session"}</span>
           <button className="icon-button" onClick={() => setShowNotifications((current) => !current)} aria-label="Notifications">
             ♢<span />
           </button>
@@ -569,9 +581,7 @@ function AuthenticatedClassroom({
                 <span className="avatar">{initials(user.displayName)}</span>
                 <div><b>{user.displayName}</b><p>{user.userId} · {role === "faculty" ? "Faculty" : "Student"}</p></div>
               </div>
-              <div className="registered-device-card"><span>✓</span><div><b>Registered device</b><p>{user.deviceLabel}</p><small>Bound {formatRegisteredDate(user.deviceRegisteredAt)}</small></div></div>
-              <p className="device-help">To move this account, release it here before signing in on the new device.</p>
-              <button className="account-action" onClick={() => void onReleaseDevice()}><span>⇄</span> Release this device</button>
+              {role === "student" ? <><div className="registered-device-card"><span>✓</span><div><b>Registered student device</b><p>{user.deviceLabel}</p><small>Bound {formatRegisteredDate(user.deviceRegisteredAt)}</small></div></div><p className="device-help">{user.deviceChangesRemaining} of 2 device changes remain in the current six-month window{user.deviceChangeWindowEnds ? ` · resets ${formatRegisteredDate(user.deviceChangeWindowEnds)}` : ""}.</p><button className="account-action" onClick={() => void releaseStudentDevice()} disabled={user.deviceChangesRemaining === 0}><span>⇄</span> Release this device</button></> : <div className="registered-device-card"><span>✓</span><div><b>No permanent device binding</b><p>Faculty accounts can sign in from another device.</p><small>Only the current secure session is retained.</small></div></div>}
               <button className="account-action signout" onClick={() => void onSignOut()}><span>↪</span> Sign out</button>
             </div>
           ) : null}

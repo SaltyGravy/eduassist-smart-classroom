@@ -59,6 +59,18 @@ export const authSystemFlags = sqliteTable("auth_system_flags", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const authDeviceChanges = sqliteTable(
+  "auth_device_changes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    changedBy: text("changed_by").notNull(),
+    reason: text("reason").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("auth_device_changes_user_idx").on(table.userId, table.createdAt)],
+);
+
 export const classroomClasses = sqliteTable(
   "classroom_classes",
   {

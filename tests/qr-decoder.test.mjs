@@ -32,12 +32,11 @@ function qrPixels(payload, scale = 7, margin = 4) {
 test("software scanner decodes an EduAssist attendance QR payload", () => {
   const payload = JSON.stringify({
     type: "eduassist-attendance",
-    version: 1,
+    version: 2,
     sessionId: 42,
-    classId: 7,
-    classCode: "CS401",
-    token: "68f6a962c356cc225b7f623077fd18189387a58e0e0dd634",
-    expiresAt: "2026-07-22 14:30:00",
+    rotation: 178472520,
+    token: "68F6A962C356CC225B7F623077FD18189387A58E",
+    expiresAt: "2026-07-22T14:20:10.000Z",
   });
   const { pixels, width } = qrPixels(payload);
   const decoded = jsQR(pixels, width, width, { inversionAttempts: "attemptBoth" });

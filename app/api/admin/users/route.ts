@@ -1,4 +1,4 @@
-import { createManagedUser, isSameOrigin, listManagedUsers } from "../../../lib/auth";
+import { createManagedUser, editManagedUser, isSameOrigin, listManagedUsers } from "../../../lib/auth";
 
 export async function GET(request: Request) {
   const result = await listManagedUsers(request);
@@ -17,4 +17,19 @@ export async function POST(request: Request) {
   });
   if (!result.ok) return Response.json({ message: result.message }, { status: result.status });
   return Response.json({ user: result.user }, { status: 201 });
+}
+
+export async function PATCH(request: Request) {
+  if (!isSameOrigin(request)) return Response.json({ message: "Not allowed." }, { status: 403 });
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const result = await editManagedUser(request, {
+    originalUserId: typeof body.originalUserId === "string" ? body.originalUserId : "",
+    userId: typeof body.userId === "string" ? body.userId : "",
+    displayName: typeof body.displayName === "string" ? body.displayName : "",
+    role: typeof body.role === "string" ? body.role : "",
+    status: typeof body.status === "string" ? body.status : "",
+    mustChangePassword: body.mustChangePassword === true,
+  });
+  if (!result.ok) return Response.json({ message: result.message }, { status: result.status });
+  return Response.json({ user: result.user });
 }

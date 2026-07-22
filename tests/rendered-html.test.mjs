@@ -33,3 +33,11 @@ test("server-renders the protected EduAssist entry point", async () => {
   assert.doesNotMatch(html, /Good morning, Dr\. Kapoor|Start attendance/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
+
+test("server-renders the administrator only on its separate route", async () => {
+  const response = await render("/admin");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>EduAssist Administration<\/title>/i);
+  assert.match(html, /Loading administrator access/i);
+});

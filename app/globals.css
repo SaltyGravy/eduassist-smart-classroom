@@ -129,7 +129,7 @@ label:focus-within {
 .login-role-picker { margin: 0; padding: 0; border: 0; }
 .login-role-picker legend,
 .auth-field > span { margin-bottom: 7px; color: #555a69; font-size: 10px; font-weight: 760; }
-.login-role-picker > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.login-role-picker > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .login-role-picker button { display: grid; min-height: 68px; grid-template-columns: 37px 1fr; grid-template-rows: 1fr 1fr; column-gap: 10px; align-items: center; padding: 10px 13px; border: 1px solid var(--line); border-radius: 12px; color: #666b78; background: white; text-align: left; cursor: pointer; }
 .login-role-picker button > span { display: grid; width: 37px; height: 37px; grid-row: 1 / 3; place-items: center; border-radius: 10px; color: var(--ink); background: #f0f1ed; font-size: 19px; }
 .login-role-picker button b { align-self: end; color: var(--ink); font-size: 11px; }
@@ -1475,4 +1475,89 @@ label:focus-within {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+.qr-rotation-status { display: flex; align-items: center; justify-content: space-between; margin: -3px auto 10px; padding: 7px 10px; width: min(360px,100%); border: 1px solid #d8dbe4; border-radius: 8px; color: #5a6070; background: #f7f8fa; }
+.qr-rotation-status span { font-size: 8px; font-weight: 800; letter-spacing: .8px; }
+.qr-rotation-status b { color: var(--ink); font-size: 10px; }
+.device-registration-preview.faculty { border-color: #d9dde6; background: #f3f5f8; }
+.device-registration-preview.faculty .device-preview-icon { background: #687087; }
+.device-registration-preview.faculty b { color: #394052; }
+.device-registration-preview.faculty p,.device-registration-preview.faculty small { color: #6e7482; }
+
+.minimal-admin-center { display: grid; min-height: 100vh; place-items: center; padding: 24px; color: #202124; background: #f5f5f5; }
+.minimal-admin-login { display: grid; gap: 16px; width: min(390px,100%); padding: 28px; border: 1px solid #d7d7d7; background: white; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+.minimal-admin-login h1 { margin: 0; font-size: 22px; }
+.minimal-admin-login > p { margin: -8px 0 4px; color: #666; font-size: 12px; }
+.minimal-admin-login label,.minimal-admin-editor label,.minimal-admin-dialog label { display: grid; gap: 6px; color: #3d3d3d; font-size: 12px; font-weight: 650; }
+.minimal-admin-login input,.minimal-admin-editor input,.minimal-admin-editor select,.minimal-admin-dialog input,.minimal-admin-dialog select { width: 100%; min-height: 39px; padding: 8px 10px; border: 1px solid #bbb; border-radius: 3px; background: white; }
+.minimal-admin-login button,.minimal-admin-editor button,.minimal-admin-dialog button,.minimal-admin-shell button { min-height: 36px; padding: 7px 12px; border: 1px solid #9d9d9d; border-radius: 3px; background: #fff; cursor: pointer; }
+.minimal-admin-login > button,.minimal-admin-editor form > button,.minimal-admin-dialog form > div button:last-child,.minimal-admin-toolbar > button { color: white; border-color: #222; background: #222; }
+.minimal-admin-login button:disabled,.minimal-admin-editor button:disabled,.minimal-admin-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.minimal-admin-login div[role="alert"] { padding: 10px; color: #831d1d; border: 1px solid #e0baba; background: #fff5f5; font-size: 12px; }
+.minimal-admin-login output { padding: 9px; color: #24592e; border: 1px solid #bad5c0; background: #f3fbf5; font-size: 12px; }
+.minimal-admin-login a { color: #555; font-size: 11px; text-align: center; }
+
+.minimal-admin-shell { display: grid; min-height: 100vh; grid-template-columns: 210px minmax(0,1fr); grid-template-rows: 54px 1fr; color: #252525; background: #f4f4f4; }
+.minimal-admin-shell > header { z-index: 2; display: flex; grid-column: 1 / -1; align-items: center; gap: 18px; padding: 0 18px; border-bottom: 1px solid #ccc; background: #fff; }
+.minimal-admin-shell > header div { display: flex; gap: 8px; align-items: baseline; }
+.minimal-admin-shell > header strong { font-size: 15px; }
+.minimal-admin-shell > header span,.minimal-admin-shell > header p { color: #777; font-size: 11px; }
+.minimal-admin-shell > header p { margin: 0 0 0 auto; }
+.minimal-admin-shell > header button { min-height: 31px; font-size: 11px; }
+.minimal-admin-shell > aside { display: flex; flex-direction: column; justify-content: space-between; padding: 18px 12px; border-right: 1px solid #ccc; background: #ededed; }
+.minimal-admin-shell > aside nav { display: grid; gap: 4px; }
+.minimal-admin-shell > aside nav button { border-color: transparent; background: transparent; text-align: left; }
+.minimal-admin-shell > aside nav button.active { border-color: #bbb; background: white; font-weight: 700; }
+.minimal-admin-shell > aside small { color: #666; font-size: 10px; line-height: 1.55; }
+.minimal-admin-shell > main { min-width: 0; padding: 22px; overflow: auto; }
+.minimal-admin-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
+.minimal-admin-toolbar h1 { margin: 0 0 3px; font-size: 20px; }
+.minimal-admin-toolbar p { margin: 0; color: #777; font-size: 11px; }
+.minimal-admin-toolbar input { width: 230px; min-height: 36px; margin-left: auto; padding: 7px 10px; border: 1px solid #bbb; background: white; }
+.minimal-admin-message { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 9px 11px; border: 1px solid #bad5c0; color: #24592e; background: #f3fbf5; font-size: 11px; }
+.minimal-admin-message.error { color: #831d1d; border-color: #e0baba; background: #fff5f5; }
+.minimal-admin-message button { min-height: auto; padding: 2px 5px; border: 0; background: transparent; font-size: 10px; }
+.minimal-admin-grid { display: grid; grid-template-columns: minmax(620px,1fr) 330px; gap: 16px; align-items: start; }
+.minimal-admin-table,.minimal-admin-audit { overflow: auto; border: 1px solid #ccc; background: white; }
+.minimal-admin-table table,.minimal-admin-audit table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.minimal-admin-table th,.minimal-admin-table td,.minimal-admin-audit th,.minimal-admin-audit td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; white-space: nowrap; }
+.minimal-admin-table th,.minimal-admin-audit th { color: #555; background: #f1f1f1; font-size: 10px; font-weight: 700; }
+.minimal-admin-table tbody tr { cursor: pointer; }
+.minimal-admin-table tbody tr:hover,.minimal-admin-table tbody tr.selected { background: #f0f4f8; }
+.minimal-admin-table td:first-child { display: grid; gap: 2px; }
+.minimal-admin-table td small { color: #777; }
+.minimal-admin-editor { display: grid; gap: 15px; padding: 17px; border: 1px solid #ccc; background: white; }
+.minimal-admin-editor h2 { margin: 0; font-size: 16px; }
+.minimal-admin-editor h3 { margin: 0 0 10px; font-size: 12px; }
+.minimal-admin-editor form { display: grid; gap: 12px; }
+.minimal-admin-editor label small { color: #777; font-size: 9px; font-weight: 400; }
+.minimal-admin-check { display: flex !important; align-items: center; grid-template-columns: auto 1fr; font-weight: 500 !important; }
+.minimal-admin-check input { width: auto; min-height: auto; }
+.minimal-admin-editor dl { display: grid; gap: 7px; margin: 0; padding: 10px 0; border-block: 1px solid #ddd; }
+.minimal-admin-editor dl div { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; }
+.minimal-admin-editor dt { color: #777; }.minimal-admin-editor dd { margin: 0; text-align: right; }
+.minimal-admin-editor section { display: grid; gap: 9px; padding-top: 2px; }
+.minimal-admin-editor section p { margin: 0; color: #606060; font-size: 10px; line-height: 1.5; }
+.minimal-admin-editor section > div { display: flex; gap: 7px; }
+.minimal-admin-audit td { white-space: normal; min-width: 110px; }
+.minimal-admin-dialog { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.28); }
+.minimal-admin-dialog form { display: grid; gap: 13px; width: min(420px,100%); padding: 22px; border: 1px solid #aaa; background: white; box-shadow: 0 8px 26px rgba(0,0,0,.18); }
+.minimal-admin-dialog h2 { margin: 0; font-size: 18px; }
+.minimal-admin-dialog form > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 5px; }
+
+@media (max-width: 1050px) {
+  .minimal-admin-grid { grid-template-columns: 1fr; }
+  .minimal-admin-editor { max-width: none; }
+}
+
+@media (max-width: 700px) {
+  .minimal-admin-shell { display: block; }
+  .minimal-admin-shell > header { height: auto; min-height: 54px; padding: 10px 12px; }
+  .minimal-admin-shell > header span,.minimal-admin-shell > header p { display: none; }
+  .minimal-admin-shell > aside { display: block; padding: 8px 12px; border-right: 0; border-bottom: 1px solid #ccc; }
+  .minimal-admin-shell > aside nav { display: flex; }.minimal-admin-shell > aside small { display: none; }
+  .minimal-admin-shell > main { padding: 13px; }
+  .minimal-admin-toolbar { align-items: stretch; flex-direction: column; }.minimal-admin-toolbar input { width: 100%; margin-left: 0; }
+  .minimal-admin-table { max-width: calc(100vw - 26px); }
 }

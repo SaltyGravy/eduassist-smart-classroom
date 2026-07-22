@@ -7,6 +7,10 @@ export type PublicAuthUser = {
   role: AuthRole;
   deviceLabel: string;
   deviceRegisteredAt: string;
+  deviceBound: boolean;
+  deviceChangesUsed: number;
+  deviceChangesRemaining: number;
+  deviceChangeWindowEnds: string | null;
   mustChangePassword: boolean;
 };
 
@@ -19,6 +23,9 @@ export type ManagedUser = {
   deviceRegistered: boolean;
   deviceLabel: string | null;
   deviceRegisteredAt: string | null;
+  deviceChangesUsed: number;
+  deviceChangesRemaining: number;
+  deviceChangeWindowEnds: string | null;
   lastLoginAt: string | null;
   createdAt: string;
 };
@@ -52,6 +59,8 @@ type UserRow = {
 };
 
 type SessionRow = UserRow & { session_token_hash: string };
+type DeviceChangeState = { used: number; remaining: number; windowEnds: string | null };
+type ManagedUserRow = UserRow & { device_changes_used?: number; oldest_device_change?: string | null };
 
 const SESSION_COOKIE = "eduassist_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
@@ -130,10 +139,19 @@ async function initializeAuthSchema() {
       value TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS auth_device_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      changed_by TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE
+    )`),
     db.prepare("CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions(user_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions(expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS auth_audit_created_idx ON auth_audit_log(created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS auth_audit_target_idx ON auth_audit_log(target_user_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS auth_device_changes_user_idx ON auth_device_changes(user_id, created_at)"),
   ]);
   await addMissingUserColumns(db);
 
@@ -173,6 +191,16 @@ async function initializeAuthSchema() {
         SELECT id FROM auth_users WHERE user_id IN ('FAC001', 'STU001', 'STU002') AND is_admin = 0
       )`),
       db.prepare("INSERT INTO auth_system_flags (key, value) VALUES ('public_account_safety_v1', 'legacy samples suspended')"),
+    ]);
+  }
+
+  const studentOnlyDeviceFlag = await db.prepare("SELECT key FROM auth_system_flags WHERE key = 'student_only_device_policy_v1'").first();
+  if (!studentOnlyDeviceFlag) {
+    await db.batch([
+      db.prepare(`UPDATE auth_users SET device_hash = NULL, device_label = NULL,
+        device_registered_at = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE is_admin = 1 OR role = 'faculty'`),
+      db.prepare("INSERT INTO auth_system_flags (key, value) VALUES ('student_only_device_policy_v1', 'device binding limited to students')"),
     ]);
   }
 }
@@ -240,27 +268,62 @@ function normalizeUserId(value: string) {
   return value.trim().toUpperCase();
 }
 
-function publicUser(row: UserRow): PublicAuthUser {
+function isStudentRow(row: UserRow) {
+  return !row.is_admin && row.role === "student";
+}
+
+function addSixMonths(value: string) {
+  const date = new Date(`${value.replace(" ", "T")}Z`);
+  date.setUTCMonth(date.getUTCMonth() + 6);
+  return date.toISOString();
+}
+
+function deviceChangeState(used = 0, oldest: string | null = null): DeviceChangeState {
+  const normalizedUsed = Number(used ?? 0);
+  return {
+    used: normalizedUsed,
+    remaining: Math.max(0, 2 - normalizedUsed),
+    windowEnds: normalizedUsed >= 2 && oldest ? addSixMonths(oldest) : null,
+  };
+}
+
+async function readDeviceChangeState(db: D1Database, userDatabaseId: number) {
+  const row = await db.prepare(`SELECT COUNT(*) AS used, MIN(created_at) AS oldest
+    FROM auth_device_changes WHERE user_id = ? AND created_at >= datetime('now', '-6 months')`).bind(userDatabaseId).first() as { used: number; oldest: string | null };
+  return deviceChangeState(Number(row?.used ?? 0), row?.oldest ?? null);
+}
+
+function publicUser(row: UserRow, changeState = deviceChangeState()): PublicAuthUser {
+  const student = isStudentRow(row);
   return {
     userId: row.user_id,
     displayName: row.display_name,
     role: roleForRow(row),
-    deviceLabel: row.device_label ?? "Registered browser",
-    deviceRegisteredAt: row.device_registered_at ?? "",
+    deviceLabel: student ? row.device_label ?? "Registered browser" : "",
+    deviceRegisteredAt: student ? row.device_registered_at ?? "" : "",
+    deviceBound: student && Boolean(row.device_hash),
+    deviceChangesUsed: student ? changeState.used : 0,
+    deviceChangesRemaining: student ? changeState.remaining : 0,
+    deviceChangeWindowEnds: student ? changeState.windowEnds : null,
     mustChangePassword: Boolean(row.must_change_password),
   };
 }
 
-function managedUser(row: UserRow): ManagedUser {
+function managedUser(row: ManagedUserRow): ManagedUser {
+  const student = isStudentRow(row);
+  const changes = deviceChangeState(Number(row.device_changes_used ?? 0), row.oldest_device_change ?? null);
   return {
     userId: row.user_id,
     displayName: row.display_name,
     role: roleForRow(row),
     status: row.status,
     mustChangePassword: Boolean(row.must_change_password),
-    deviceRegistered: Boolean(row.device_hash),
-    deviceLabel: row.device_label,
-    deviceRegisteredAt: row.device_registered_at,
+    deviceRegistered: student && Boolean(row.device_hash),
+    deviceLabel: student ? row.device_label : null,
+    deviceRegisteredAt: student ? row.device_registered_at : null,
+    deviceChangesUsed: student ? changes.used : 0,
+    deviceChangesRemaining: student ? changes.remaining : 0,
+    deviceChangeWindowEnds: student ? changes.windowEnds : null,
     lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
   };
@@ -329,12 +392,13 @@ export async function loginWithDevice({ request, userId, password, role, deviceI
   }
 
   const deviceHash = await sha256(deviceId);
-  if (row.device_hash && row.device_hash !== deviceHash) {
+  const studentDevicePolicy = isStudentRow(row);
+  if (studentDevicePolicy && row.device_hash && row.device_hash !== deviceHash) {
     await recordAudit(db, row.user_id, "device_blocked", row.user_id, row.device_label ?? "Another device");
     return { ok: false as const, status: 409, code: "DEVICE_MISMATCH", message: `This account is already registered to ${row.device_label ?? "another device"}. Release it from the registered device or ask the administrator to reset it.` };
   }
 
-  const registeredNow = !row.device_hash;
+  const registeredNow = studentDevicePolicy && !row.device_hash;
   const safeLabel = normalizeDeviceLabel(deviceLabel);
   if (registeredNow) {
     await db
@@ -344,7 +408,7 @@ export async function loginWithDevice({ request, userId, password, role, deviceI
   }
 
   const refreshed = (await db.prepare("SELECT * FROM auth_users WHERE id = ?").bind(row.id).first()) as UserRow;
-  if (refreshed.device_hash !== deviceHash) return { ok: false as const, status: 409, code: "DEVICE_MISMATCH", message: "Another device registered this account first. Try again after the device is released." };
+  if (studentDevicePolicy && refreshed.device_hash !== deviceHash) return { ok: false as const, status: 409, code: "DEVICE_MISMATCH", message: "Another device registered this account first. Try again after the device is released." };
 
   const token = randomToken();
   const tokenHash = await sha256(token);
@@ -353,10 +417,11 @@ export async function loginWithDevice({ request, userId, password, role, deviceI
     db.prepare(`INSERT INTO auth_sessions (token_hash, user_id, device_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+7 days'))`).bind(tokenHash, row.id, deviceHash),
     db.prepare("UPDATE auth_users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id),
   ]);
-  await recordAudit(db, row.user_id, "login", row.user_id, registeredNow ? `Registered ${safeLabel}` : `Verified ${safeLabel}`);
+  await recordAudit(db, row.user_id, "login", row.user_id, registeredNow ? `Registered ${safeLabel}` : studentDevicePolicy ? `Verified ${safeLabel}` : `Session from ${safeLabel}`);
 
   const loggedIn = (await db.prepare("SELECT * FROM auth_users WHERE id = ?").bind(row.id).first()) as UserRow;
-  return { ok: true as const, user: publicUser(loggedIn), registeredNow, cookie: sessionCookie(request, token) };
+  const changeState = studentDevicePolicy ? await readDeviceChangeState(db, row.id) : deviceChangeState();
+  return { ok: true as const, user: publicUser(loggedIn, changeState), registeredNow, cookie: sessionCookie(request, token) };
 }
 
 export async function getSession(request: Request) {
@@ -367,10 +432,15 @@ export async function getSession(request: Request) {
   const tokenHash = await sha256(token);
   const deviceHash = await sha256(deviceId);
   const row = (await db
-    .prepare(`SELECT u.*, s.token_hash AS session_token_hash FROM auth_sessions s JOIN auth_users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.device_hash = ? AND u.device_hash = ? AND u.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`)
+    .prepare(`SELECT u.*, s.token_hash AS session_token_hash FROM auth_sessions s JOIN auth_users u ON u.id = s.user_id
+      WHERE s.token_hash = ? AND s.device_hash = ?
+      AND (u.is_admin = 1 OR u.role = 'faculty' OR u.device_hash = ?)
+      AND u.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`)
     .bind(tokenHash, deviceHash, deviceHash)
     .first()) as SessionRow | null;
-  return row ? { user: publicUser(row), userRow: row, tokenHash } : null;
+  if (!row) return null;
+  const changeState = isStudentRow(row) ? await readDeviceChangeState(db, row.id) : deviceChangeState();
+  return { user: publicUser(row, changeState), userRow: row, tokenHash };
 }
 
 export async function getAuthorizedSession(request: Request, roles: AuthRole[]) {
@@ -388,14 +458,21 @@ export async function logoutSession(request: Request) {
 
 export async function releaseOwnDevice(request: Request) {
   const session = await getSession(request);
-  if (!session) return null;
+  if (!session) return { ok: false as const, status: 401, message: "Your session has expired." };
+  if (session.user.role !== "student") return { ok: false as const, status: 400, message: "Faculty and administrator accounts do not use device registration." };
   const db = await getAuthDb();
+  const changes = await readDeviceChangeState(db, session.userRow.id);
+  if (changes.remaining <= 0) {
+    const date = changes.windowEnds ? new Date(changes.windowEnds).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "the end of the six-month window";
+    return { ok: false as const, status: 429, message: `You have used both device changes allowed in six months. The next change is available after ${date}.` };
+  }
   await db.batch([
+    db.prepare("INSERT INTO auth_device_changes (user_id, changed_by, reason) VALUES (?, ?, 'Released by account owner')").bind(session.userRow.id, session.user.userId),
     db.prepare(`UPDATE auth_users SET device_hash = NULL, device_label = NULL, device_registered_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(session.userRow.id),
     db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(session.userRow.id),
   ]);
   await recordAudit(db, session.user.userId, "device_released", session.user.userId, "Released by account owner");
-  return session.user;
+  return { ok: true as const };
 }
 
 export async function changeOwnPassword(request: Request, newPassword: string) {
@@ -409,7 +486,8 @@ export async function changeOwnPassword(request: Request, newPassword: string) {
   await db.prepare(`UPDATE auth_users SET password_salt = ?, password_hash = ?, must_change_password = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(salt, hash, session.userRow.id).run();
   await recordAudit(db, session.user.userId, "password_changed", session.user.userId, "Password updated by account owner");
   const row = (await db.prepare("SELECT * FROM auth_users WHERE id = ?").bind(session.userRow.id).first()) as UserRow;
-  return { ok: true as const, user: publicUser(row) };
+  const changeState = isStudentRow(row) ? await readDeviceChangeState(db, row.id) : deviceChangeState();
+  return { ok: true as const, user: publicUser(row, changeState) };
 }
 
 async function getAdminSession(request: Request) {
@@ -422,8 +500,12 @@ export async function listManagedUsers(request: Request) {
   const session = await getAdminSession(request);
   if (!session) return null;
   const db = await getAuthDb();
-  const result = await db.prepare("SELECT * FROM auth_users ORDER BY is_admin DESC, created_at DESC, display_name ASC").all();
-  return { actor: session.user, users: (result.results as UserRow[]).map(managedUser) };
+  const result = await db.prepare(`SELECT u.*,
+      COUNT(dc.id) AS device_changes_used, MIN(dc.created_at) AS oldest_device_change
+    FROM auth_users u
+    LEFT JOIN auth_device_changes dc ON dc.user_id = u.id AND dc.created_at >= datetime('now', '-6 months')
+    GROUP BY u.id ORDER BY u.is_admin DESC, u.created_at DESC, u.display_name ASC`).all();
+  return { actor: session.user, users: (result.results as ManagedUserRow[]).map(managedUser) };
 }
 
 export async function createManagedUser(request: Request, input: { userId: string; displayName: string; role: string; temporaryPassword: string }) {
@@ -448,6 +530,53 @@ export async function createManagedUser(request: Request, input: { userId: strin
   return { ok: true as const, user: managedUser(row) };
 }
 
+export async function editManagedUser(request: Request, input: {
+  originalUserId: string;
+  userId: string;
+  displayName: string;
+  role: string;
+  status: string;
+  mustChangePassword: boolean;
+}) {
+  const session = await getAdminSession(request);
+  if (!session) return { ok: false as const, status: 403, message: "Administrator access is required." };
+  const originalUserId = normalizeUserId(input.originalUserId);
+  const userId = normalizeUserId(input.userId);
+  const displayName = input.displayName.replace(/[<>\r\n]/g, "").trim().slice(0, 80);
+  if (!/^[A-Z0-9_-]{3,20}$/.test(userId)) return { ok: false as const, status: 400, message: "User ID must be 3–20 letters, numbers, hyphens, or underscores." };
+  if (displayName.length < 2) return { ok: false as const, status: 400, message: "Enter the user's full name." };
+  if (input.status !== "active" && input.status !== "suspended") return { ok: false as const, status: 400, message: "Choose Active or Suspended." };
+
+  const db = await getAuthDb();
+  const target = await db.prepare("SELECT * FROM auth_users WHERE user_id = ?").bind(originalUserId).first() as UserRow | null;
+  if (!target) return { ok: false as const, status: 404, message: "User not found." };
+  const nextRole = target.is_admin ? target.role : input.role;
+  if (!target.is_admin && nextRole !== "faculty" && nextRole !== "student") return { ok: false as const, status: 400, message: "Choose Faculty or Student." };
+  if (target.user_id === session.user.userId && input.status !== "active") return { ok: false as const, status: 400, message: "You cannot suspend the administrator account currently in use." };
+
+  if (!target.is_admin && target.role !== nextRole) {
+    const related = target.role === "faculty"
+      ? await db.prepare("SELECT id FROM classroom_classes WHERE faculty_user_id = ? LIMIT 1").bind(target.id).first()
+      : await db.prepare("SELECT id FROM class_enrolments WHERE student_user_id = ? LIMIT 1").bind(target.id).first();
+    if (related) return { ok: false as const, status: 409, message: target.role === "faculty" ? "This faculty account owns classes. Reassign or archive them before changing the role." : "This student account is enrolled in classes. Remove those enrolments before changing the role." };
+  }
+
+  const duplicate = await db.prepare("SELECT id FROM auth_users WHERE user_id = ? AND id <> ?").bind(userId, target.id).first();
+  if (duplicate) return { ok: false as const, status: 409, message: "That user ID already exists." };
+  await db.prepare(`UPDATE auth_users SET user_id = ?, display_name = ?, role = ?, status = ?, must_change_password = ?,
+    device_hash = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_hash ELSE NULL END,
+    device_label = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_label ELSE NULL END,
+    device_registered_at = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_registered_at ELSE NULL END,
+    updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(userId, displayName, nextRole, input.status, input.mustChangePassword ? 1 : 0, nextRole, nextRole, nextRole, target.id).run();
+  if (input.status === "suspended") await db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(target.id).run();
+  await recordAudit(db, session.user.userId, "user_edited", userId, `${originalUserId} → ${userId}; ${displayName}; ${roleForRow(target)} → ${target.is_admin ? "admin" : nextRole}; ${input.status}`);
+  const row = await db.prepare(`SELECT u.*, COUNT(dc.id) AS device_changes_used, MIN(dc.created_at) AS oldest_device_change
+    FROM auth_users u LEFT JOIN auth_device_changes dc ON dc.user_id = u.id AND dc.created_at >= datetime('now', '-6 months')
+    WHERE u.id = ? GROUP BY u.id`).bind(target.id).first() as ManagedUserRow;
+  return { ok: true as const, user: managedUser(row) };
+}
+
 export async function manageUser(request: Request, input: { userId: string; action: string; temporaryPassword?: string }) {
   const session = await getAdminSession(request);
   if (!session) return { ok: false as const, status: 403, message: "Administrator access is required." };
@@ -455,14 +584,23 @@ export async function manageUser(request: Request, input: { userId: string; acti
   const db = await getAuthDb();
   const target = (await db.prepare("SELECT * FROM auth_users WHERE user_id = ?").bind(userId).first()) as UserRow | null;
   if (!target) return { ok: false as const, status: 404, message: "User not found." };
-  if (target.user_id === session.user.userId) return { ok: false as const, status: 400, message: "Use your account menu to manage your own account." };
+  if (target.user_id === session.user.userId) return { ok: false as const, status: 400, message: "Use your account settings to manage the current administrator." };
 
   if (input.action === "release_device") {
+    if (!isStudentRow(target)) return { ok: false as const, status: 400, message: "Only student accounts use registered-device binding." };
+    if (!target.device_hash) return { ok: false as const, status: 400, message: "This student does not currently have a registered device." };
+    const changes = await readDeviceChangeState(db, target.id);
+    if (changes.remaining <= 0) return { ok: false as const, status: 429, message: "This student has already used both device changes allowed in the current six-month window. Reset the allowance only after verifying the mishap." };
     await db.batch([
+      db.prepare("INSERT INTO auth_device_changes (user_id, changed_by, reason) VALUES (?, ?, 'Administrator recovery')").bind(target.id, session.user.userId),
       db.prepare(`UPDATE auth_users SET device_hash = NULL, device_label = NULL, device_registered_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(target.id),
       db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(target.id),
     ]);
     await recordAudit(db, session.user.userId, "device_released_admin", userId, "Administrator recovery");
+  } else if (input.action === "reset_device_changes") {
+    if (!isStudentRow(target)) return { ok: false as const, status: 400, message: "Only student accounts have a device-change allowance." };
+    await db.prepare("DELETE FROM auth_device_changes WHERE user_id = ?").bind(target.id).run();
+    await recordAudit(db, session.user.userId, "device_allowance_reset", userId, "Six-month device-change history reset by administrator");
   } else if (input.action === "suspend" || input.action === "activate") {
     const status = input.action === "suspend" ? "suspended" : "active";
     await db.prepare("UPDATE auth_users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(status, target.id).run();
@@ -483,7 +621,9 @@ export async function manageUser(request: Request, input: { userId: string; acti
     return { ok: false as const, status: 400, message: "Unsupported account action." };
   }
 
-  const row = (await db.prepare("SELECT * FROM auth_users WHERE id = ?").bind(target.id).first()) as UserRow;
+  const row = (await db.prepare(`SELECT u.*, COUNT(dc.id) AS device_changes_used, MIN(dc.created_at) AS oldest_device_change
+    FROM auth_users u LEFT JOIN auth_device_changes dc ON dc.user_id = u.id AND dc.created_at >= datetime('now', '-6 months')
+    WHERE u.id = ? GROUP BY u.id`).bind(target.id).first()) as ManagedUserRow;
   return { ok: true as const, user: managedUser(row) };
 }
 

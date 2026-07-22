@@ -43,6 +43,11 @@ type SessionRow = {
   section: string;
 };
 
+const ATTENDANCE_ROTATION_MS = 10_000;
+const ATTENDANCE_GRACE_MS = 2_000;
+const MANUAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const textEncoder = new TextEncoder();
+
 let classroomSchemaPromise: Promise<void> | null = null;
 
 async function initializeClassroomSchema() {
@@ -280,15 +285,43 @@ export async function getClassRoster(request: Request, classId: number) {
   };
 }
 
-function publicAttendanceSession(row: SessionRow) {
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function timingSafeEqual(left: string, right: string) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return difference === 0;
+}
+
+async function rotatingCredential(row: SessionRow, rotation: number) {
+  const key = await crypto.subtle.importKey("raw", textEncoder.encode(row.qr_token), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(`${row.id}:${rotation}`)));
+  return {
+    token: bytesToHex(signature.slice(0, 20)).toUpperCase(),
+    manualCode: Array.from(signature.slice(20, 30), (byte) => MANUAL_CODE_ALPHABET[byte % MANUAL_CODE_ALPHABET.length]).join(""),
+  };
+}
+
+function acceptedRotations(now = Date.now()) {
+  const current = Math.floor(now / ATTENDANCE_ROTATION_MS);
+  return now % ATTENDANCE_ROTATION_MS <= ATTENDANCE_GRACE_MS ? [current, current - 1] : [current];
+}
+
+async function publicAttendanceSession(row: SessionRow) {
+  const now = Date.now();
+  const rotation = Math.floor(now / ATTENDANCE_ROTATION_MS);
+  const credential = await rotatingCredential(row, rotation);
+  const qrExpiresAt = new Date((rotation + 1) * ATTENDANCE_ROTATION_MS).toISOString();
   const qrPayload = JSON.stringify({
     type: "eduassist-attendance",
-    version: 1,
+    version: 2,
     sessionId: Number(row.id),
-    classId: Number(row.class_id),
-    classCode: row.subject_code,
-    token: row.qr_token,
-    expiresAt: row.expires_at,
+    rotation,
+    token: credential.token,
+    expiresAt: qrExpiresAt,
   });
   return {
     id: Number(row.id),
@@ -300,8 +333,9 @@ function publicAttendanceSession(row: SessionRow) {
     startsAt: row.starts_at,
     expiresAt: row.expires_at,
     status: row.status,
-    manualCode: row.manual_code,
+    manualCode: credential.manualCode,
     qrPayload,
+    qrExpiresAt,
   };
 }
 
@@ -339,7 +373,7 @@ export async function startAttendance(request: Request, input: { classId: number
     throw error;
   }
   const row = await readSessionRow(db, newSessionId);
-  return { ok: true as const, attendanceSession: publicAttendanceSession(row as SessionRow) };
+  return { ok: true as const, attendanceSession: await publicAttendanceSession(row as SessionRow) };
 }
 
 export async function getAttendanceSession(request: Request, sessionId: number) {
@@ -360,7 +394,7 @@ export async function getAttendanceSession(request: Request, sessionId: number) 
     LEFT JOIN attendance_records r ON r.student_user_id = e.student_user_id AND r.session_id = ?
     WHERE e.class_id = ? ORDER BY u.display_name ASC`).bind(sessionId, row.class_id).all();
   return {
-    attendanceSession: publicAttendanceSession(refreshed),
+    attendanceSession: await publicAttendanceSession(refreshed),
     roster: roster.results.map((entry: Record<string, unknown>) => ({
       userId: String(entry.user_id),
       displayName: String(entry.display_name),
@@ -374,12 +408,19 @@ export async function getAttendanceSession(request: Request, sessionId: number) 
 function parseAttendanceCredential(value: string) {
   const clean = value.trim();
   try {
-    const parsed = JSON.parse(clean) as { type?: string; token?: string };
-    if (parsed.type === "eduassist-attendance" && typeof parsed.token === "string") return parsed.token.toUpperCase();
+    const parsed = JSON.parse(clean) as { type?: string; sessionId?: number; rotation?: number; token?: string };
+    if (
+      parsed.type === "eduassist-attendance"
+      && Number.isInteger(parsed.sessionId)
+      && Number.isInteger(parsed.rotation)
+      && typeof parsed.token === "string"
+    ) {
+      return { source: "qr" as const, sessionId: Number(parsed.sessionId), rotation: Number(parsed.rotation), token: parsed.token.toUpperCase() };
+    }
   } catch {
-    // Manual codes and raw tokens are accepted below.
+    // Manual codes are accepted below.
   }
-  return clean.toUpperCase();
+  return { source: "manual" as const, code: clean.toUpperCase() };
 }
 
 export async function getActiveAttendanceSession(request: Request, classId: number) {
@@ -397,19 +438,42 @@ export async function markAttendance(request: Request, credentialInput: string) 
   const session = await getAuthorizedSession(request, ["student"]);
   if (!session) return { ok: false as const, status: 403, message: "Student access is required." };
   const credential = parseAttendanceCredential(credentialInput);
-  if (!/^[A-Z0-9]{10}$/.test(credential) && !/^[A-F0-9]{48}$/.test(credential)) {
+  if (credential.source === "qr" && !/^[A-F0-9]{40}$/.test(credential.token)) {
+    return { ok: false as const, status: 400, message: "Scan a valid EduAssist QR code or enter the session code." };
+  }
+  if (credential.source === "manual" && !/^[A-Z0-9]{10}$/.test(credential.code)) {
     return { ok: false as const, status: 400, message: "Scan a valid EduAssist QR code or enter the session code." };
   }
   const db = await getClassroomDb();
-  const attendance = (await db.prepare(`SELECT s.*, c.subject_name, c.subject_code, c.semester, c.section
-    FROM attendance_sessions s JOIN classroom_classes c ON c.id = s.class_id
-    WHERE (UPPER(s.qr_token) = ? OR UPPER(s.manual_code) = ?) AND s.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`).bind(credential, credential).first()) as SessionRow | null;
+  let attendance: SessionRow | null = null;
+  const validRotations = acceptedRotations();
+  if (credential.source === "qr" && validRotations.includes(credential.rotation)) {
+    const candidate = await readSessionRow(db, credential.sessionId);
+    if (candidate && candidate.status === "active" && new Date(`${candidate.expires_at.replace(" ", "T")}Z`).getTime() > Date.now()) {
+      const expected = await rotatingCredential(candidate, credential.rotation);
+      if (timingSafeEqual(expected.token, credential.token)) attendance = candidate;
+    }
+  } else if (credential.source === "manual") {
+    const active = await db.prepare(`SELECT s.*, c.subject_name, c.subject_code, c.semester, c.section
+      FROM attendance_sessions s JOIN classroom_classes c ON c.id = s.class_id
+      WHERE s.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`).all();
+    for (const candidate of active.results as SessionRow[]) {
+      for (const rotation of validRotations) {
+        const expected = await rotatingCredential(candidate, rotation);
+        if (timingSafeEqual(expected.manualCode, credential.code)) {
+          attendance = candidate;
+          break;
+        }
+      }
+      if (attendance) break;
+    }
+  }
   if (!attendance) return { ok: false as const, status: 410, message: "That attendance session is invalid, closed, or expired." };
   const enrolled = await db.prepare("SELECT id FROM class_enrolments WHERE class_id = ? AND student_user_id = ?").bind(attendance.class_id, session.databaseUserId).first();
   if (!enrolled) return { ok: false as const, status: 403, message: "You are not enrolled in this class." };
   const inserted = await db.prepare(`INSERT INTO attendance_records (session_id, student_user_id, status, source)
     VALUES (?, ?, 'present', ?) ON CONFLICT(session_id, student_user_id) DO NOTHING`)
-    .bind(attendance.id, session.databaseUserId, credential.length === 10 ? "manual" : "qr").run();
+    .bind(attendance.id, session.databaseUserId, credential.source).run();
   const record = await db.prepare("SELECT status, marked_at FROM attendance_records WHERE session_id = ? AND student_user_id = ?").bind(attendance.id, session.databaseUserId).first() as { status: string; marked_at: string };
   return {
     ok: true as const,
