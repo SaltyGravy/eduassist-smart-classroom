@@ -1,6 +1,7 @@
 import {
   createManagedUser,
   editManagedUser,
+  getAppDatabase,
   isAdminBridgeRequest,
   listAuditEvents,
   listManagedUsers,
@@ -8,10 +9,37 @@ import {
   verifyAdminCredentials,
 } from "../../../lib/auth";
 
+const migrationTables = [
+  "auth_users",
+  "auth_sessions",
+  "auth_audit_log",
+  "auth_system_flags",
+  "auth_device_changes",
+  "classroom_classes",
+  "class_enrolments",
+  "attendance_sessions",
+  "attendance_records",
+] as const;
+
 export async function POST(request: Request) {
   if (!(await isAdminBridgeRequest(request))) return Response.json({ message: "Not allowed." }, { status: 403 });
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const action = typeof body.action === "string" ? body.action : "";
+
+  if (action === "export_migration_snapshot") {
+    const db = await getAppDatabase();
+    const tables: Record<string, unknown[]> = {};
+    for (const table of migrationTables) {
+      const result = await db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+      tables[table] = result.results ?? [];
+    }
+    return Response.json({
+      format: "eduassist-migration-snapshot",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tables,
+    }, { headers: { "cache-control": "no-store" } });
+  }
 
   if (action === "authenticate") {
     const admin = await verifyAdminCredentials(
