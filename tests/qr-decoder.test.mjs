@@ -32,9 +32,10 @@ function qrPixels(payload, scale = 7, margin = 4) {
 test("software scanner decodes an EduAssist attendance QR payload", () => {
   const payload = JSON.stringify({
     type: "eduassist-attendance",
-    version: 2,
+    version: 3,
     sessionId: 42,
     rotation: 178472520,
+    rotationSeconds: 10,
     token: "68F6A962C356CC225B7F623077FD18189387A58E",
     expiresAt: "2026-07-22T14:20:10.000Z",
   });

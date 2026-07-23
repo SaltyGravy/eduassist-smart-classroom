@@ -71,6 +71,7 @@ export const schemaStatements = [
     starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    rotation_seconds INTEGER NOT NULL DEFAULT 10,
     created_by INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
     closed_at TEXT
   )`,
@@ -117,6 +118,6 @@ export const tableColumns = {
   auth_device_changes: ["id", "user_id", "changed_by", "reason", "created_at"],
   classroom_classes: ["id", "subject_name", "subject_code", "semester", "section", "class_code", "faculty_user_id", "status", "created_at", "updated_at"],
   class_enrolments: ["id", "class_id", "student_user_id", "joined_at"],
-  attendance_sessions: ["id", "class_id", "qr_token", "manual_code", "starts_at", "expires_at", "status", "created_by", "closed_at"],
+  attendance_sessions: ["id", "class_id", "qr_token", "manual_code", "starts_at", "expires_at", "status", "rotation_seconds", "created_by", "closed_at"],
   attendance_records: ["id", "session_id", "student_user_id", "status", "source", "marked_at", "corrected_by"],
 };

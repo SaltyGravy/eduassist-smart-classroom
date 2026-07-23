@@ -1,4 +1,11 @@
-import { getAppDatabase, getAuthorizedSession } from "./auth";
+import {
+  getAppDatabase,
+  getAuthorizedSession,
+  QR_ROTATION_DEFAULT_SECONDS,
+  QR_ROTATION_MAX_SECONDS,
+  QR_ROTATION_MIN_SECONDS,
+  readClassroomSettings,
+} from "./auth";
 import type { AppDatabase } from "../../db/client";
 
 export type ClassroomRole = "faculty" | "student";
@@ -38,13 +45,13 @@ type SessionRow = {
   starts_at: string;
   expires_at: string;
   status: "active" | "closed";
+  rotation_seconds: number;
   subject_name: string;
   subject_code: string;
   semester: string;
   section: string;
 };
 
-const ATTENDANCE_ROTATION_MS = 10_000;
 const ATTENDANCE_GRACE_MS = 2_000;
 const MANUAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const textEncoder = new TextEncoder();
@@ -84,6 +91,7 @@ async function initializeClassroomSchema() {
       starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       expires_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
+      rotation_seconds INTEGER NOT NULL DEFAULT 10,
       created_by INTEGER NOT NULL,
       closed_at TEXT,
       FOREIGN KEY (class_id) REFERENCES classroom_classes(id) ON DELETE CASCADE,
@@ -109,6 +117,14 @@ async function initializeClassroomSchema() {
     db.prepare("CREATE INDEX IF NOT EXISTS attendance_sessions_expiry_idx ON attendance_sessions(expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS attendance_records_student_idx ON attendance_records(student_user_id)"),
   ]);
+  const attendanceColumns = await db.prepare("PRAGMA table_info(attendance_sessions)").all<{ name: string }>();
+  if (!attendanceColumns.results.some((column) => column.name === "rotation_seconds")) {
+    try {
+      await db.prepare("ALTER TABLE attendance_sessions ADD COLUMN rotation_seconds INTEGER NOT NULL DEFAULT 10").run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+  }
 }
 
 async function getClassroomDb() {
@@ -379,21 +395,32 @@ async function rotatingCredential(row: SessionRow, rotation: number) {
   };
 }
 
-function acceptedRotations(now = Date.now()) {
-  const current = Math.floor(now / ATTENDANCE_ROTATION_MS);
-  return now % ATTENDANCE_ROTATION_MS <= ATTENDANCE_GRACE_MS ? [current, current - 1] : [current];
+function rotationMilliseconds(row: SessionRow) {
+  const seconds = Number(row.rotation_seconds);
+  const safeSeconds = Number.isInteger(seconds) && seconds >= QR_ROTATION_MIN_SECONDS && seconds <= QR_ROTATION_MAX_SECONDS
+    ? seconds
+    : QR_ROTATION_DEFAULT_SECONDS;
+  return safeSeconds * 1000;
+}
+
+function acceptedRotations(row: SessionRow, now = Date.now()) {
+  const interval = rotationMilliseconds(row);
+  const current = Math.floor(now / interval);
+  return now % interval <= ATTENDANCE_GRACE_MS ? [current, current - 1] : [current];
 }
 
 async function publicAttendanceSession(row: SessionRow) {
   const now = Date.now();
-  const rotation = Math.floor(now / ATTENDANCE_ROTATION_MS);
+  const interval = rotationMilliseconds(row);
+  const rotation = Math.floor(now / interval);
   const credential = await rotatingCredential(row, rotation);
-  const qrExpiresAt = new Date((rotation + 1) * ATTENDANCE_ROTATION_MS).toISOString();
+  const qrExpiresAt = new Date((rotation + 1) * interval).toISOString();
   const qrPayload = JSON.stringify({
     type: "eduassist-attendance",
-    version: 2,
+    version: 3,
     sessionId: Number(row.id),
     rotation,
+    rotationSeconds: interval / 1000,
     token: credential.token,
     expiresAt: qrExpiresAt,
   });
@@ -407,6 +434,7 @@ async function publicAttendanceSession(row: SessionRow) {
     startsAt: row.starts_at,
     expiresAt: row.expires_at,
     status: row.status,
+    rotationSeconds: interval / 1000,
     manualCode: credential.manualCode,
     qrPayload,
     qrExpiresAt,
@@ -430,14 +458,15 @@ export async function startAttendance(request: Request, input: { classId: number
   if (!Number(enrolment.count)) return { ok: false as const, status: 400, message: "Add at least one student before starting attendance." };
   const active = await db.prepare("SELECT id FROM attendance_sessions WHERE class_id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP").bind(input.classId).first();
   if (active) return { ok: false as const, status: 409, message: "This class already has an active attendance session." };
+  const { qrRotationSeconds } = await readClassroomSettings();
   const token = makeAttendanceToken();
   const manualCode = makeManualCode();
   let newSessionId: number;
   try {
     const inserted = await db.prepare(`INSERT INTO attendance_sessions
-      (class_id, qr_token, manual_code, expires_at, created_by)
-      VALUES (?, ?, ?, datetime('now', ?), ?)`)
-      .bind(input.classId, token, manualCode, `+${durationMinutes} minutes`, session.databaseUserId)
+      (class_id, qr_token, manual_code, expires_at, rotation_seconds, created_by)
+      VALUES (?, ?, ?, datetime('now', ?), ?, ?)`)
+      .bind(input.classId, token, manualCode, `+${durationMinutes} minutes`, qrRotationSeconds, session.databaseUserId)
       .run();
     newSessionId = Number(inserted.meta.last_row_id);
   } catch (error) {
@@ -520,10 +549,14 @@ export async function markAttendance(request: Request, credentialInput: string) 
   }
   const db = await getClassroomDb();
   let attendance: SessionRow | null = null;
-  const validRotations = acceptedRotations();
-  if (credential.source === "qr" && validRotations.includes(credential.rotation)) {
+  if (credential.source === "qr") {
     const candidate = await readSessionRow(db, credential.sessionId);
-    if (candidate && candidate.status === "active" && new Date(`${candidate.expires_at.replace(" ", "T")}Z`).getTime() > Date.now()) {
+    if (
+      candidate
+      && acceptedRotations(candidate).includes(credential.rotation)
+      && candidate.status === "active"
+      && new Date(`${candidate.expires_at.replace(" ", "T")}Z`).getTime() > Date.now()
+    ) {
       const expected = await rotatingCredential(candidate, credential.rotation);
       if (timingSafeEqual(expected.token, credential.token)) attendance = candidate;
     }
@@ -532,7 +565,7 @@ export async function markAttendance(request: Request, credentialInput: string) 
       FROM attendance_sessions s JOIN classroom_classes c ON c.id = s.class_id
       WHERE s.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`).all();
     for (const candidate of active.results as SessionRow[]) {
-      for (const rotation of validRotations) {
+      for (const rotation of acceptedRotations(candidate)) {
         const expected = await rotatingCredential(candidate, rotation);
         if (timingSafeEqual(expected.manualCode, credential.code)) {
           attendance = candidate;

@@ -34,7 +34,7 @@ try {
     const rows = snapshot.tables[table];
     const statements = rows.map((row) => ({
       sql: `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
-      args: columns.map((column) => row[column] ?? null),
+      args: columns.map((column) => column === "rotation_seconds" ? row[column] ?? 10 : row[column] ?? null),
     }));
     for (let index = 0; index < statements.length; index += 100) {
       await client.batch(statements.slice(index, index + 100), "write");

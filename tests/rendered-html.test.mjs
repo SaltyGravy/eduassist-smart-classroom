@@ -33,3 +33,20 @@ test("keeps class management faculty-only and removes the dashboard search bar",
   assert.match(service, /getAuthorizedSession\(request, \["faculty"\]\)/);
   assert.match(service, /Close the active attendance session before deleting this class/);
 });
+
+test("stores the administrator-selected QR rotation interval on each attendance session", async () => {
+  const [modules, bridge, service, schema] = await Promise.all([
+    readFile(new URL("../app/ClassroomModules.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/bridge/admin/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/classroom.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/schema.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(bridge, /action === "get_settings"/);
+  assert.match(bridge, /action === "update_settings"/);
+  assert.match(service, /rotation_seconds INTEGER NOT NULL DEFAULT 10/);
+  assert.match(service, /acceptedRotations\(candidate\)/);
+  assert.match(service, /readClassroomSettings\(\)/);
+  assert.match(schema, /"rotation_seconds"/);
+  assert.match(modules, /attendanceSession\.rotationSeconds/);
+  assert.doesNotMatch(modules, /refreshes every 10 seconds|change every 10 seconds/);
+});

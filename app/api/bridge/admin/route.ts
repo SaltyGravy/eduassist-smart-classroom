@@ -2,10 +2,12 @@ import {
   createManagedUser,
   editManagedUser,
   getAppDatabase,
+  getManagedSystemSettings,
   isAdminBridgeRequest,
   listAuditEvents,
   listManagedUsers,
   manageUser,
+  updateManagedSystemSettings,
   verifyAdminCredentials,
 } from "../../../lib/auth";
 
@@ -60,6 +62,20 @@ export async function POST(request: Request) {
     const events = await listAuditEvents(request);
     if (!events) return Response.json({ message: "Administrator access is required." }, { status: 403 });
     return Response.json({ events });
+  }
+
+  if (action === "get_settings") {
+    const settings = await getManagedSystemSettings(request);
+    if (!settings) return Response.json({ message: "Administrator access is required." }, { status: 403 });
+    return Response.json({ settings });
+  }
+
+  if (action === "update_settings") {
+    const result = await updateManagedSystemSettings(request, {
+      qrRotationSeconds: typeof body.qrRotationSeconds === "number" ? body.qrRotationSeconds : Number.NaN,
+    });
+    if (!result.ok) return Response.json({ message: result.message }, { status: result.status });
+    return Response.json({ settings: result.settings });
   }
 
   if (action === "create_user") {

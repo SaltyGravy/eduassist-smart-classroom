@@ -68,6 +68,10 @@ const SESSION_COOKIE = "eduassist_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 // Cloudflare Workers Web Crypto currently caps PBKDF2 at 100,000 rounds.
 const PASSWORD_ITERATIONS = 100_000;
+export const QR_ROTATION_DEFAULT_SECONDS = 10;
+export const QR_ROTATION_MIN_SECONDS = 5;
+export const QR_ROTATION_MAX_SECONDS = 60;
+const QR_ROTATION_SETTING_KEY = "qr_rotation_seconds";
 const encoder = new TextEncoder();
 let schemaPromise: Promise<void> | null = null;
 
@@ -676,4 +680,50 @@ export async function listAuditEvents(request: Request) {
     detail: row.detail,
     createdAt: row.created_at,
   }));
+}
+
+function validQrRotationSeconds(value: unknown) {
+  const seconds = Number(value);
+  return Number.isInteger(seconds) && seconds >= QR_ROTATION_MIN_SECONDS && seconds <= QR_ROTATION_MAX_SECONDS
+    ? seconds
+    : QR_ROTATION_DEFAULT_SECONDS;
+}
+
+export async function readClassroomSettings() {
+  const db = await getAuthDb();
+  const row = await db.prepare("SELECT value FROM auth_system_flags WHERE key = ?").bind(QR_ROTATION_SETTING_KEY).first() as { value: string } | null;
+  return { qrRotationSeconds: validQrRotationSeconds(row?.value) };
+}
+
+export async function getManagedSystemSettings(request: Request) {
+  const session = await getAdminSession(request);
+  if (!session) return null;
+  return readClassroomSettings();
+}
+
+export async function updateManagedSystemSettings(request: Request, input: { qrRotationSeconds: number }) {
+  const session = await getAdminSession(request);
+  if (!session) return { ok: false as const, status: 403, message: "Administrator access is required." };
+  const qrRotationSeconds = Number(input.qrRotationSeconds);
+  if (!Number.isInteger(qrRotationSeconds) || qrRotationSeconds < QR_ROTATION_MIN_SECONDS || qrRotationSeconds > QR_ROTATION_MAX_SECONDS) {
+    return {
+      ok: false as const,
+      status: 400,
+      message: `QR rotation time must be a whole number from ${QR_ROTATION_MIN_SECONDS} to ${QR_ROTATION_MAX_SECONDS} seconds.`,
+    };
+  }
+  const previous = await readClassroomSettings();
+  const db = await getAuthDb();
+  await db.prepare(`INSERT INTO auth_system_flags (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = CURRENT_TIMESTAMP`)
+    .bind(QR_ROTATION_SETTING_KEY, String(qrRotationSeconds))
+    .run();
+  await recordAudit(
+    db,
+    session.user.userId,
+    "system_settings_updated",
+    "QR_ATTENDANCE",
+    `QR rotation ${previous.qrRotationSeconds}s → ${qrRotationSeconds}s`,
+  );
+  return { ok: true as const, settings: { qrRotationSeconds } };
 }
