@@ -407,7 +407,6 @@ function AuthenticatedClassroom({
   const [quizPublished, setQuizPublished] = useState(true);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [quizResult, setQuizResult] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
   const [showProfile, setShowProfile] = useState(false);
 
   const nav = role === "faculty" ? facultyNav : studentNav;
@@ -437,15 +436,8 @@ function AuthenticatedClassroom({
     return () => window.clearTimeout(timer);
   }, [deviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filteredClasses = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return classes;
-    return classes.filter((item) => `${item.subjectCode} ${item.subjectName} ${item.semester} ${item.section} ${item.classCode}`.toLowerCase().includes(query));
-  }, [classes, search]);
-
   function navigate(nextView: View) {
     setView(nextView);
-    setSearch("");
   }
 
   async function createClass(event: FormEvent<HTMLFormElement>) {
@@ -545,16 +537,6 @@ function AuthenticatedClassroom({
             <span>{role === "faculty" ? "Faculty portal" : "Student portal"}</span>
             <h1>{pageTitle}</h1>
           </div>
-          <label className="search-box">
-            <span>⌕</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search classes, notes, quizzes..."
-              aria-label="Search classroom"
-            />
-            <kbd>⌘ K</kbd>
-          </label>
           <span className="device-status"><i /> {role === "student" ? "Student device registered" : "Secure faculty session"}</span>
           <button className="icon-button" onClick={() => setShowNotifications((current) => !current)} aria-label="Notifications">
             ♢<span />
@@ -593,7 +575,7 @@ function AuthenticatedClassroom({
             )
           ) : null}
           {view === "classes" ? (
-            classesLoading ? <div className="report-loading"><span className="auth-loader"><i /><i /><i /></span><p>Loading classes…</p></div> : <LiveClassesView role={role} classes={filteredClasses} deviceId={deviceId} onCreate={() => setShowCreate(true)} onRefresh={refreshClasses} onNotify={setToast} />
+            classesLoading ? <div className="report-loading"><span className="auth-loader"><i /><i /><i /></span><p>Loading classes…</p></div> : <LiveClassesView role={role} classes={classes} deviceId={deviceId} onCreate={() => setShowCreate(true)} onRefresh={refreshClasses} onNotify={setToast} />
           ) : null}
           {view === "attendance" ? (
             <LiveAttendanceView role={role} classes={classes} deviceId={deviceId} onNotify={setToast} />

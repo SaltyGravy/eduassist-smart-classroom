@@ -106,6 +106,11 @@ function EmptyModule({ icon, title, detail, action }: { icon: string; title: str
 export function LiveClassesView({ role, classes, deviceId, onCreate, onRefresh, onNotify }: { role: Role; classes: LiveClass[]; deviceId: string; onCreate: () => void; onRefresh: () => Promise<void>; onNotify: (message: string) => void }) {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
+  const [editingClass, setEditingClass] = useState<LiveClass | null>(null);
+  const [deletingClass, setDeletingClass] = useState<LiveClass | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [managing, setManaging] = useState(false);
+  const [manageError, setManageError] = useState("");
 
   async function join(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -126,17 +131,97 @@ export function LiveClassesView({ role, classes, deviceId, onCreate, onRefresh, 
     }
   }
 
-  return <section className="page-stack live-classes-page">
-    <div className="section-title-row"><div><span className="eyebrow">ACADEMIC YEAR 2026–27</span><h2>{role === "faculty" ? "Your live classes" : "Your enrolled classes"}</h2><p>{role === "faculty" ? "Create classes, share join codes, and manage enrolled students." : "Join a faculty class once, then use its secure attendance sessions."}</p></div>{role === "faculty" ? <button className="button primary" onClick={onCreate}>＋ Create class</button> : null}</div>
-    {role === "student" ? <form className="join-class-panel" onSubmit={join}><span>⌁</span><div><b>Join another class</b><p>Enter the seven-character code shared by your faculty.</p></div><input name="classCode" required minLength={7} maxLength={7} placeholder="ABC2345" aria-label="Class join code" /><button className="button primary" disabled={joining}>{joining ? "Joining…" : "Join class"}</button>{error ? <small>{error}</small> : null}</form> : null}
-    <div className="class-card-grid">
-      {classes.map((item, index) => <article className="class-card live-class-card" key={item.id}>
-        <div className={`class-card-top ${["navy", "mint", "yellow", "coral"][index % 4]}`}><span>{item.subjectCode}</span><div className="class-monogram">{classMonogram(item.subjectName)}</div></div>
-        <div className="class-card-body"><h3>{item.subjectName}</h3><p>{item.semester} · Section {item.section}</p><div className="class-stats"><span><b>{item.studentCount}</b> students</span><span><b>{role === "faculty" ? "Owner" : "Faculty"}</b> {item.facultyName}</span></div><div className="class-code-box"><span>JOIN CODE</span><b>{item.classCode}</b><button onClick={() => { void navigator.clipboard?.writeText(item.classCode); onNotify("Class join code copied."); }}>Copy</button></div><div className="live-class-foot"><span><i /> Active class</span><small>Created {dateLabel(item.createdAt, false)}</small></div></div>
-      </article>)}
-      {classes.length === 0 ? <EmptyModule icon="▣" title={role === "faculty" ? "Create your first class" : "No enrolled classes yet"} detail={role === "faculty" ? "A unique join code will be generated automatically." : "Ask your faculty for a class code and enter it above."} action={role === "faculty" ? <button className="button primary" onClick={onCreate}>Create class</button> : undefined} /> : null}
-    </div>
-  </section>;
+  async function editClass(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingClass) return;
+    const data = new FormData(event.currentTarget);
+    setManaging(true);
+    setManageError("");
+    try {
+      const response = await fetch("/api/classroom/classes", {
+        method: "PATCH",
+        headers: requestHeaders(deviceId, true),
+        body: JSON.stringify({
+          classId: editingClass.id,
+          subjectName: String(data.get("subjectName") ?? ""),
+          subjectCode: String(data.get("subjectCode") ?? "").toUpperCase(),
+          semester: String(data.get("semester") ?? ""),
+          section: String(data.get("section") ?? "").toUpperCase(),
+        }),
+      });
+      const result = await resultJson<{ classroom: LiveClass }>(response);
+      await onRefresh();
+      setEditingClass(null);
+      onNotify(`${result.classroom.subjectCode} was updated.`);
+    } catch (reason) {
+      setManageError(reason instanceof Error ? reason.message : "The class could not be updated.");
+    } finally {
+      setManaging(false);
+    }
+  }
+
+  async function removeClass(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!deletingClass) return;
+    setManaging(true);
+    setManageError("");
+    try {
+      const response = await fetch("/api/classroom/classes", {
+        method: "DELETE",
+        headers: requestHeaders(deviceId, true),
+        body: JSON.stringify({ classId: deletingClass.id, confirmationCode: deleteConfirmation }),
+      });
+      const result = await resultJson<{ className: string; removed: { enrolments: number; attendanceSessions: number; attendanceRecords: number } }>(response);
+      await onRefresh();
+      setDeletingClass(null);
+      setDeleteConfirmation("");
+      onNotify(`${result.className} was deleted with ${result.removed.attendanceRecords} attendance record${result.removed.attendanceRecords === 1 ? "" : "s"}.`);
+    } catch (reason) {
+      setManageError(reason instanceof Error ? reason.message : "The class could not be deleted.");
+    } finally {
+      setManaging(false);
+    }
+  }
+
+  return <>
+    <section className="page-stack live-classes-page">
+      <div className="section-title-row"><div><span className="eyebrow">ACADEMIC YEAR 2026–27</span><h2>{role === "faculty" ? "Your live classes" : "Your enrolled classes"}</h2><p>{role === "faculty" ? "Create classes, share join codes, and manage enrolled students." : "Join a faculty class once, then use its secure attendance sessions."}</p></div>{role === "faculty" ? <button className="button primary" onClick={onCreate}>＋ Create class</button> : null}</div>
+      {role === "student" ? <form className="join-class-panel" onSubmit={join}><span>⌁</span><div><b>Join another class</b><p>Enter the seven-character code shared by your faculty.</p></div><input name="classCode" required minLength={7} maxLength={7} placeholder="ABC2345" aria-label="Class join code" /><button className="button primary" disabled={joining}>{joining ? "Joining…" : "Join class"}</button>{error ? <small>{error}</small> : null}</form> : null}
+      <div className="class-card-grid">
+        {classes.map((item, index) => <article className="class-card live-class-card" key={item.id}>
+          <div className={`class-card-top ${["navy", "mint", "yellow", "coral"][index % 4]}`}><span>{item.subjectCode}</span><div className="class-monogram">{classMonogram(item.subjectName)}</div></div>
+          <div className="class-card-body"><h3>{item.subjectName}</h3><p>{item.semester} · Section {item.section}</p><div className="class-stats"><span><b>{item.studentCount}</b> students</span><span><b>{role === "faculty" ? "Owner" : "Faculty"}</b> {item.facultyName}</span></div><div className="class-code-box"><span>JOIN CODE</span><b>{item.classCode}</b><button onClick={() => { void navigator.clipboard?.writeText(item.classCode); onNotify("Class join code copied."); }}>Copy</button></div><div className="live-class-foot"><span><i /> Active class</span><small>Created {dateLabel(item.createdAt, false)}</small></div>{role === "faculty" ? <div className="class-management-actions"><button onClick={() => { setEditingClass(item); setManageError(""); }}>Edit class</button><button className="danger" onClick={() => { setDeletingClass(item); setDeleteConfirmation(""); setManageError(""); }}>Delete</button></div> : null}</div>
+        </article>)}
+        {classes.length === 0 ? <EmptyModule icon="▣" title={role === "faculty" ? "Create your first class" : "No enrolled classes yet"} detail={role === "faculty" ? "A unique join code will be generated automatically." : "Ask your faculty for a class code and enter it above."} action={role === "faculty" ? <button className="button primary" onClick={onCreate}>Create class</button> : undefined} /> : null}
+      </div>
+    </section>
+
+    {editingClass ? <div className="modal-backdrop" onMouseDown={() => { if (!managing) setEditingClass(null); }}>
+      <div className="modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-class-title">
+        <div className="modal-header"><div><span className="eyebrow">EDIT CLASS</span><h2 id="edit-class-title">{editingClass.subjectName}</h2></div><button onClick={() => setEditingClass(null)} disabled={managing} aria-label="Close">×</button></div>
+        <form onSubmit={editClass}>
+          <label>Subject name<input name="subjectName" required defaultValue={editingClass.subjectName} /></label>
+          <div className="form-row"><label>Subject code<input name="subjectCode" required defaultValue={editingClass.subjectCode} maxLength={16} /></label><label>Section<input name="section" required defaultValue={editingClass.section} maxLength={12} /></label></div>
+          <label>Semester<input name="semester" required defaultValue={editingClass.semester} maxLength={30} /></label>
+          <div className="modal-note"><span>✓</span><p><b>The join code remains unchanged.</b><br />Enrolments and attendance history stay connected to this class.</p></div>
+          {manageError ? <div className="module-error">! {manageError}</div> : null}
+          <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setEditingClass(null)} disabled={managing}>Cancel</button><button className="button primary" type="submit" disabled={managing}>{managing ? "Saving…" : "Save changes"}</button></div>
+        </form>
+      </div>
+    </div> : null}
+
+    {deletingClass ? <div className="modal-backdrop" onMouseDown={() => { if (!managing) setDeletingClass(null); }}>
+      <div className="modal class-delete-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-class-title">
+        <div className="modal-header"><div><span className="eyebrow danger">DELETE CLASS</span><h2 id="delete-class-title">{deletingClass.subjectName}</h2></div><button onClick={() => setDeletingClass(null)} disabled={managing} aria-label="Close">×</button></div>
+        <form onSubmit={removeClass}>
+          <div className="modal-note warning"><span>!</span><p><b>This permanently removes the class.</b><br />Its enrolments, attendance sessions, and attendance records will also be deleted. Close any active attendance session first.</p></div>
+          <label>Type <b>{deletingClass.classCode}</b> to confirm<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value.toUpperCase())} required autoComplete="off" placeholder={deletingClass.classCode} aria-label="Class deletion confirmation code" /></label>
+          {manageError ? <div className="module-error">! {manageError}</div> : null}
+          <div className="modal-actions"><button type="button" className="button ghost" onClick={() => setDeletingClass(null)} disabled={managing}>Cancel</button><button className="button danger-button" type="submit" disabled={managing || deleteConfirmation.trim() !== deletingClass.classCode}>{managing ? "Deleting…" : "Delete class permanently"}</button></div>
+        </form>
+      </div>
+    </div> : null}
+  </>;
 }
 
 type RosterStudent = { databaseId: number; userId: string; displayName: string; joinedAt: string; totalSessions: number; attendedSessions: number; attendanceRate: number | null };

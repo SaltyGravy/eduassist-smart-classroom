@@ -411,26 +411,7 @@ label:focus-within {
   letter-spacing: -0.35px;
 }
 
-.search-box {
-  display: flex;
-  width: min(390px, 34vw);
-  height: 42px;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: white;
-  box-shadow: 0 3px 12px rgba(38, 46, 91, 0.03);
-}
-
-.search-box > span { color: #858a96; font-size: 22px; transform: rotate(-12deg); }
-.search-box input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 12.5px; }
-.search-box input::placeholder { color: #a2a5ae; }
-.search-box kbd { padding: 3px 6px; border: 1px solid #e1e2df; border-radius: 5px; color: #a0a3ab; background: #f8f8f5; font: 9px ui-monospace, monospace; }
-
-.device-status { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid #cde1da; border-radius: 99px; color: #4b7769; background: var(--mint-soft); font-size: 8.5px; font-weight: 800; white-space: nowrap; }
+.device-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 7px 9px; border: 1px solid #cde1da; border-radius: 99px; color: #4b7769; background: var(--mint-soft); font-size: 8.5px; font-weight: 800; white-space: nowrap; }
 .device-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 3px rgba(121,185,165,.16); }
 
 .icon-button {
@@ -1253,6 +1234,14 @@ label:focus-within {
 .class-code-box button,.live-roster-header button { border: 0; color: #57719f; background: transparent; font-size: 8px; font-weight: 800; cursor: pointer; }
 .live-class-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--muted); font-size: 7.5px; }
 .live-class-foot > span { color: #54816f; font-weight: 750; }.live-class-foot i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--mint); }
+.class-management-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 13px; padding-top: 12px; border-top: 1px solid #eeeeea; }
+.class-management-actions button { min-height: 34px; padding: 0 12px; border: 1px solid #cfd9e9; border-radius: 8px; color: #506b99; background: var(--blue-soft); font-size: 8px; font-weight: 850; cursor: pointer; }
+.class-management-actions button.danger { color: #9a5146; border-color: #efcbc4; background: #fff1ee; }
+.button.danger-button { color: white; border-color: #a9584b; background: #a9584b; }
+.button.danger-button:hover { background: #93493e; }
+.class-delete-modal .eyebrow.danger { color: #a9584b; }
+.class-delete-modal label > b { color: #a9584b; font-family: ui-monospace, monospace; letter-spacing: .7px; }
+.class-delete-modal input { font-family: ui-monospace, monospace; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 .module-class-select { min-width: 180px; height: 39px; padding: 0 32px 0 11px; border: 1px solid var(--line); border-radius: 9px; outline: none; color: var(--ink); background: white; font-size: 9px; font-weight: 750; }
 .module-error { padding: 12px 14px; border: 1px solid #eccbc4; border-radius: 11px; color: #925347; background: #fff3f0; font-size: 9px; line-height: 1.45; }
 .live-roster-title,.live-roster-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 17px 18px; border-bottom: 1px solid var(--line); }
@@ -1299,7 +1288,6 @@ label:focus-within {
   .content-area { padding-inline: 24px; }
   .profile-copy,
   .chevron { display: none; }
-  .search-box { width: min(330px, 31vw); }
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .class-card-grid { grid-template-columns: 1fr 1fr; }
   .student-hero { padding-inline: 32px; }
@@ -1325,7 +1313,7 @@ label:focus-within {
   .mobile-brand { display: flex; align-items: center; gap: 2px; color: var(--ink); font-size: 16px; font-weight: 800; }
   .page-heading,
   .device-status { display: none; }
-  .search-box { width: auto; flex: 1; margin-left: 8px; }
+  .topbar .icon-button { margin-left: auto; }
   .profile-button { display: flex; }
   .profile-button .profile-copy,
   .profile-button .chevron { display: none; }
@@ -1382,8 +1370,6 @@ label:focus-within {
   .device-ready { display: none; }
   .topbar { gap: 8px; }
   .mobile-brand { font-size: 0; }
-  .search-box kbd { display: none; }
-  .search-box input { font-size: 11px; }
   .content-area { padding-inline: 14px; }
   .welcome-row,
   .section-title-row { align-items: flex-start; flex-direction: column; gap: 15px; }

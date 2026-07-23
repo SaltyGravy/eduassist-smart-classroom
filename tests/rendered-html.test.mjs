@@ -17,3 +17,19 @@ test("keeps the public entry point limited to faculty and students", async () =>
 test("does not contain an administrator page in the public app", async () => {
   await assert.rejects(access(new URL("../app/admin/page.tsx", import.meta.url)));
 });
+
+test("keeps class management faculty-only and removes the dashboard search bar", async () => {
+  const [classroom, modules, route, service] = await Promise.all([
+    readFile(new URL("../app/ClassroomApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ClassroomModules.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/classroom/classes/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/classroom.ts", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(classroom, /Search classes, notes, quizzes|className="search-box"/);
+  assert.match(modules, /role === "faculty".*class-management-actions/s);
+  assert.match(modules, /Type <b>\{deletingClass\.classCode\}<\/b> to confirm/);
+  assert.match(route, /export async function PATCH/);
+  assert.match(route, /export async function DELETE/);
+  assert.match(service, /getAuthorizedSession\(request, \["faculty"\]\)/);
+  assert.match(service, /Close the active attendance session before deleting this class/);
+});

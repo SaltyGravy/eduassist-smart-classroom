@@ -126,6 +126,17 @@ function cleanText(value: string, maximum = 80) {
   return value.replace(/[<>\r\n]/g, "").trim().slice(0, maximum);
 }
 
+function validateClassFields(input: { subjectName: string; subjectCode: string; semester: string; section: string }) {
+  const subjectName = cleanText(input.subjectName);
+  const subjectCode = cleanText(input.subjectCode, 16).toUpperCase();
+  const semester = cleanText(input.semester, 30);
+  const section = cleanText(input.section, 12).toUpperCase();
+  if (subjectName.length < 2) return { ok: false as const, status: 400, message: "Enter a subject name." };
+  if (!/^[A-Z0-9-]{2,16}$/.test(subjectCode)) return { ok: false as const, status: 400, message: "Use a valid subject code." };
+  if (!semester || !section) return { ok: false as const, status: 400, message: "Enter the semester and section." };
+  return { ok: true as const, subjectName, subjectCode, semester, section };
+}
+
 function randomString(length: number, alphabet: string) {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
@@ -209,13 +220,9 @@ export async function listClasses(request: Request) {
 export async function createClass(request: Request, input: { subjectName: string; subjectCode: string; semester: string; section: string }) {
   const session = await getAuthorizedSession(request, ["faculty"]);
   if (!session) return { ok: false as const, status: 403, message: "Faculty access is required." };
-  const subjectName = cleanText(input.subjectName);
-  const subjectCode = cleanText(input.subjectCode, 16).toUpperCase();
-  const semester = cleanText(input.semester, 30);
-  const section = cleanText(input.section, 12).toUpperCase();
-  if (subjectName.length < 2) return { ok: false as const, status: 400, message: "Enter a subject name." };
-  if (!/^[A-Z0-9-]{2,16}$/.test(subjectCode)) return { ok: false as const, status: 400, message: "Use a valid subject code." };
-  if (!semester || !section) return { ok: false as const, status: 400, message: "Enter the semester and section." };
+  const fields = validateClassFields(input);
+  if (!fields.ok) return fields;
+  const { subjectName, subjectCode, semester, section } = fields;
   const db = await getClassroomDb();
   let classCode = makeClassCode();
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -232,6 +239,72 @@ export async function createClass(request: Request, input: { subjectName: string
   const row = (await db.prepare(`SELECT c.*, u.display_name AS faculty_name, 0 AS student_count, NULL AS joined_at
     FROM classroom_classes c JOIN auth_users u ON u.id = c.faculty_user_id WHERE c.id = ?`).bind(classId).first()) as ClassRow;
   return { ok: true as const, classroom: mapClass(row) };
+}
+
+export async function updateClass(request: Request, input: { classId: number; subjectName: string; subjectCode: string; semester: string; section: string }) {
+  const session = await getAuthorizedSession(request, ["faculty"]);
+  if (!session) return { ok: false as const, status: 403, message: "Faculty access is required." };
+  const classId = Number(input.classId);
+  if (!Number.isInteger(classId) || classId <= 0) return { ok: false as const, status: 400, message: "Choose a valid class." };
+  const fields = validateClassFields(input);
+  if (!fields.ok) return fields;
+  const db = await getClassroomDb();
+  const existing = (await getOwnedClass(db, classId, session.databaseUserId)) as { class_code: string } | null;
+  if (!existing) return { ok: false as const, status: 404, message: "Class not found." };
+  const updated = await db.prepare(`UPDATE classroom_classes
+    SET subject_name = ?, subject_code = ?, semester = ?, section = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND faculty_user_id = ? AND status = 'active'`)
+    .bind(fields.subjectName, fields.subjectCode, fields.semester, fields.section, classId, session.databaseUserId)
+    .run();
+  if (Number(updated.meta.changes ?? 0) === 0) return { ok: false as const, status: 404, message: "Class not found." };
+  await db.prepare("INSERT INTO auth_audit_log (actor_user_id, action, target_user_id, detail) VALUES (?, 'class_updated', ?, ?)")
+    .bind(session.user.userId, existing.class_code, `${fields.subjectCode} · ${fields.subjectName}`.slice(0, 240))
+    .run();
+  const row = (await db.prepare(`SELECT c.*, u.display_name AS faculty_name, COUNT(e.id) AS student_count, NULL AS joined_at
+    FROM classroom_classes c
+    JOIN auth_users u ON u.id = c.faculty_user_id
+    LEFT JOIN class_enrolments e ON e.class_id = c.id
+    WHERE c.id = ? AND c.faculty_user_id = ?
+    GROUP BY c.id`).bind(classId, session.databaseUserId).first()) as ClassRow;
+  return { ok: true as const, classroom: mapClass(row) };
+}
+
+export async function deleteClass(request: Request, input: { classId: number; confirmationCode: string }) {
+  const session = await getAuthorizedSession(request, ["faculty"]);
+  if (!session) return { ok: false as const, status: 403, message: "Faculty access is required." };
+  const classId = Number(input.classId);
+  if (!Number.isInteger(classId) || classId <= 0) return { ok: false as const, status: 400, message: "Choose a valid class." };
+  const db = await getClassroomDb();
+  await finalizeExpiredSessions(db, classId);
+  const classroom = (await getOwnedClass(db, classId, session.databaseUserId)) as { class_code: string; subject_name: string } | null;
+  if (!classroom) return { ok: false as const, status: 404, message: "Class not found." };
+  const confirmationCode = cleanText(input.confirmationCode, 12).toUpperCase().replace(/\s/g, "");
+  if (confirmationCode !== classroom.class_code) {
+    return { ok: false as const, status: 400, message: `Type ${classroom.class_code} to confirm deletion.` };
+  }
+  const activeSession = await db.prepare("SELECT id FROM attendance_sessions WHERE class_id = ? AND status = 'active'").bind(classId).first();
+  if (activeSession) {
+    return { ok: false as const, status: 409, message: "Close the active attendance session before deleting this class." };
+  }
+  const [enrolmentCount, sessionCount, recordCount] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS count FROM class_enrolments WHERE class_id = ?").bind(classId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM attendance_sessions WHERE class_id = ?").bind(classId).first<{ count: number }>(),
+    db.prepare(`SELECT COUNT(*) AS count FROM attendance_records r
+      JOIN attendance_sessions s ON s.id = r.session_id WHERE s.class_id = ?`).bind(classId).first<{ count: number }>(),
+  ]);
+  const deleted = await db.prepare("DELETE FROM classroom_classes WHERE id = ? AND faculty_user_id = ? AND status = 'active'")
+    .bind(classId, session.databaseUserId)
+    .run();
+  if (Number(deleted.meta.changes ?? 0) === 0) return { ok: false as const, status: 404, message: "Class not found." };
+  const removed = {
+    enrolments: Number(enrolmentCount?.count ?? 0),
+    attendanceSessions: Number(sessionCount?.count ?? 0),
+    attendanceRecords: Number(recordCount?.count ?? 0),
+  };
+  await db.prepare("INSERT INTO auth_audit_log (actor_user_id, action, target_user_id, detail) VALUES (?, 'class_deleted', ?, ?)")
+    .bind(session.user.userId, classroom.class_code, `${classroom.subject_name}; ${removed.enrolments} enrolments; ${removed.attendanceSessions} sessions; ${removed.attendanceRecords} records`.slice(0, 240))
+    .run();
+  return { ok: true as const, className: classroom.subject_name, removed };
 }
 
 export async function joinClass(request: Request, classCodeInput: string) {
