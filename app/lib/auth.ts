@@ -174,7 +174,10 @@ async function initializeAuthSchema() {
     db.prepare("CREATE INDEX IF NOT EXISTS auth_device_changes_user_idx ON auth_device_changes(user_id, created_at)"),
   ]);
   await addMissingUserColumns(db);
-  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS auth_users_student_roll_unique ON auth_users(roll_number) WHERE role = 'student' AND roll_number <> ''").run();
+  await db.prepare("DROP INDEX IF EXISTS auth_users_student_roll_unique").run();
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS auth_users_student_academic_identity_unique
+    ON auth_users(department, section, roll_number)
+    WHERE role = 'student' AND roll_number <> ''`).run();
 
   const bootstrapAccounts = [
     {
@@ -614,36 +617,46 @@ export async function createManagedUser(request: Request, input: {
   const userId = normalizeUserId(input.userId);
   const displayName = input.displayName.replace(/[<>\r\n]/g, "").trim().slice(0, 80);
   if (!/^[A-Z0-9_-]{3,20}$/.test(userId)) return { ok: false as const, status: 400, message: "User ID must be 3–20 letters, numbers, hyphens, or underscores." };
-  if (input.role !== "faculty" && input.role !== "student") return { ok: false as const, status: 400, message: "Choose Faculty or Student." };
+  if (input.role !== "admin" && input.role !== "faculty" && input.role !== "student") {
+    return { ok: false as const, status: 400, message: "Choose Administrator, Faculty, or Student." };
+  }
   if (displayName.length < 2) return { ok: false as const, status: 400, message: "Enter the user's full name." };
-  const profile = academicProfile(input, input.role);
+  const requestedRole = input.role as AuthRole;
+  const profile = academicProfile(input, requestedRole);
   if (!profile.ok) return profile;
-  const initialPassword = input.role === "student"
+  const initialPassword = requestedRole === "student"
     ? defaultStudentPassword(displayName, profile.rollNumber)
     : input.temporaryPassword;
-  if (input.role === "faculty") {
+  if (requestedRole !== "student") {
     const passwordError = validatePassword(initialPassword);
     if (passwordError) return { ok: false as const, status: 400, message: passwordError };
   }
-  if (!initialPassword) return { ok: false as const, status: 400, message: "The student default password could not be generated." };
+  if (!initialPassword) return { ok: false as const, status: 400, message: "The initial password could not be generated." };
 
   const db = await getAuthDb();
   const existing = await db.prepare("SELECT id FROM auth_users WHERE user_id = ?").bind(userId).first();
   if (existing) return { ok: false as const, status: 409, message: "That user ID already exists." };
-  if (input.role === "student") {
-    const duplicateRoll = await db.prepare("SELECT id FROM auth_users WHERE role = 'student' AND roll_number = ?").bind(profile.rollNumber).first();
-    if (duplicateRoll) return { ok: false as const, status: 409, message: "That student roll number already exists." };
+  if (requestedRole === "student") {
+    const duplicateRoll = await db.prepare(`SELECT id FROM auth_users
+      WHERE role = 'student' AND department = ? AND section = ? AND roll_number = ?`)
+      .bind(profile.department, profile.section, profile.rollNumber).first();
+    if (duplicateRoll) {
+      return { ok: false as const, status: 409, message: "That roll number already exists in the selected department and section." };
+    }
   }
+  const storedRole: StoredRole = requestedRole === "student" ? "student" : "faculty";
+  const isAdmin = requestedRole === "admin" ? 1 : 0;
+  const mustChangePassword = requestedRole === "admin" ? 0 : 1;
   const salt = randomToken().slice(0, 32);
   const hash = await derivePassword(initialPassword, salt);
   await db.prepare(`INSERT INTO auth_users
     (user_id, display_name, role, department, section, roll_number, semester, is_admin, status, must_change_password, password_salt, password_hash, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', 1, ?, ?, ?)`)
-    .bind(userId, displayName, input.role, profile.department, profile.section, profile.rollNumber, profile.semester, salt, hash, session.user.userId)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`)
+    .bind(userId, displayName, storedRole, profile.department, profile.section, profile.rollNumber, profile.semester, isAdmin, mustChangePassword, salt, hash, session.user.userId)
     .run();
-  await recordAudit(db, session.user.userId, "user_created", userId, `${input.role}: ${displayName}; ${profile.department}${profile.section ? `-${profile.section}` : ""}${profile.rollNumber ? `; ${profile.rollNumber}` : ""}`);
+  await recordAudit(db, session.user.userId, "user_created", userId, `${requestedRole}: ${displayName}; ${profile.department}${profile.section ? `-${profile.section}` : ""}${profile.rollNumber ? `; ${profile.rollNumber}` : ""}`);
   const row = (await db.prepare("SELECT * FROM auth_users WHERE user_id = ?").bind(userId).first()) as UserRow;
-  return { ok: true as const, user: managedUser(row), initialPassword: input.role === "student" ? initialPassword : null };
+  return { ok: true as const, user: managedUser(row), initialPassword: requestedRole === "student" ? initialPassword : null };
 }
 
 export async function editManagedUser(request: Request, input: {
@@ -686,8 +699,12 @@ export async function editManagedUser(request: Request, input: {
   const duplicate = await db.prepare("SELECT id FROM auth_users WHERE user_id = ? AND id <> ?").bind(userId, target.id).first();
   if (duplicate) return { ok: false as const, status: 409, message: "That user ID already exists." };
   if (!target.is_admin && nextRole === "student") {
-    const duplicateRoll = await db.prepare("SELECT id FROM auth_users WHERE role = 'student' AND roll_number = ? AND id <> ?").bind(profile.rollNumber, target.id).first();
-    if (duplicateRoll) return { ok: false as const, status: 409, message: "That student roll number already exists." };
+    const duplicateRoll = await db.prepare(`SELECT id FROM auth_users
+      WHERE role = 'student' AND department = ? AND section = ? AND roll_number = ? AND id <> ?`)
+      .bind(profile.department, profile.section, profile.rollNumber, target.id).first();
+    if (duplicateRoll) {
+      return { ok: false as const, status: 409, message: "That roll number already exists in the selected department and section." };
+    }
   }
   await db.prepare(`UPDATE auth_users SET user_id = ?, display_name = ?, role = ?, department = ?, section = ?, roll_number = ?, semester = ?, status = ?, must_change_password = ?,
     device_hash = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_hash ELSE NULL END,
@@ -703,7 +720,7 @@ export async function editManagedUser(request: Request, input: {
       profile.rollNumber,
       profile.semester,
       input.status,
-      input.mustChangePassword ? 1 : 0,
+      target.is_admin ? 0 : input.mustChangePassword ? 1 : 0,
       nextRole,
       nextRole,
       nextRole,
@@ -808,10 +825,10 @@ export async function manageUser(request: Request, input: { userId: string; acti
     const salt = randomToken().slice(0, 32);
     const hash = await derivePassword(temporaryPassword, salt);
     await db.batch([
-      db.prepare("UPDATE auth_users SET password_salt = ?, password_hash = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(salt, hash, target.id),
+      db.prepare("UPDATE auth_users SET password_salt = ?, password_hash = ?, must_change_password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(salt, hash, target.is_admin ? 0 : 1, target.id),
       db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(target.id),
     ]);
-    await recordAudit(db, session.user.userId, "password_reset_admin", userId, "Temporary password issued");
+    await recordAudit(db, session.user.userId, "password_reset_admin", userId, target.is_admin ? "Administrator password replaced" : "Temporary password issued");
   } else {
     return { ok: false as const, status: 400, message: "Unsupported account action." };
   }

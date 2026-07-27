@@ -1,0 +1,2 @@
+DROP INDEX `auth_users_student_roll_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `auth_users_student_academic_identity_unique` ON `auth_users` (`department`,`section`,`roll_number`) WHERE "auth_users"."role" = 'student' AND "auth_users"."roll_number" <> '';

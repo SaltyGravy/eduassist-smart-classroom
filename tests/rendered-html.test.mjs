@@ -51,7 +51,7 @@ test("stores the administrator-selected QR rotation interval on each attendance 
   assert.doesNotMatch(modules, /refreshes every 10 seconds|change every 10 seconds/);
 });
 
-test("stores typed academic profiles and derives the student first-login password", async () => {
+test("stores typed academic profiles, scopes roll uniqueness, and derives the student first-login password", async () => {
   const [auth, bridge, schema] = await Promise.all([
     readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bridge/admin/route.ts", import.meta.url), "utf8"),
@@ -62,9 +62,21 @@ test("stores typed academic profiles and derives the student first-login passwor
   assert.match(auth, /function defaultStudentPassword/);
   assert.match(auth, /defaultStudentPassword\(displayName, profile\.rollNumber\)/);
   assert.match(auth, /must_change_password.*1/s);
+  assert.match(auth, /department = \? AND section = \? AND roll_number = \?/);
   assert.match(bridge, /department: typeof body\.department/);
   assert.match(bridge, /initialPassword: result\.initialPassword/);
-  assert.match(schema, /auth_users_student_roll_unique/);
+  assert.match(schema, /auth_users_student_academic_identity_unique/);
+  assert.match(schema, /auth_users\(department, section, roll_number\)/);
+  assert.doesNotMatch(schema, /CREATE UNIQUE INDEX IF NOT EXISTS auth_users_student_roll_unique/);
+});
+
+test("creates protected administrators that can use the private panel immediately", async () => {
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
+  assert.match(auth, /input\.role !== "admin"/);
+  assert.match(auth, /const isAdmin = requestedRole === "admin" \? 1 : 0/);
+  assert.match(auth, /const mustChangePassword = requestedRole === "admin" \? 0 : 1/);
+  assert.match(auth, /target\.is_admin \? 0 : 1/);
+  assert.match(auth, /Administrator accounts cannot be deleted/);
 });
 
 test("permanently deletes only non-admin users and audits dependent record cleanup", async () => {

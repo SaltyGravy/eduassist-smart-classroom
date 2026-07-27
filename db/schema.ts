@@ -26,7 +26,9 @@ export const authUsers = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("auth_users_student_roll_unique").on(table.rollNumber).where(sql`${table.role} = 'student' AND ${table.rollNumber} <> ''`),
+    uniqueIndex("auth_users_student_academic_identity_unique")
+      .on(table.department, table.section, table.rollNumber)
+      .where(sql`${table.role} = 'student' AND ${table.rollNumber} <> ''`),
   ],
 );
 
