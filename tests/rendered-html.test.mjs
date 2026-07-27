@@ -67,6 +67,21 @@ test("stores typed academic profiles and derives the student first-login passwor
   assert.match(schema, /auth_users_student_roll_unique/);
 });
 
+test("permanently deletes only non-admin users and audits dependent record cleanup", async () => {
+  const [auth, bridge, actionRoute] = await Promise.all([
+    readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/bridge/admin/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/user-action/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(auth, /input\.action === "delete_user"/);
+  assert.match(auth, /Administrator accounts cannot be deleted/);
+  assert.match(auth, /DELETE FROM attendance_records/);
+  assert.match(auth, /DELETE FROM auth_users WHERE id = \? AND is_admin = 0/);
+  assert.match(auth, /"user_deleted"/);
+  assert.match(bridge, /!\("user" in result\)/);
+  assert.match(actionRoute, /deletedDisplayName: result\.deletedDisplayName/);
+});
+
 test("exports styled department-section workbooks and enables manual codes only on demand", async () => {
   const [modules, workbook, service, route] = await Promise.all([
     readFile(new URL("../app/ClassroomModules.tsx", import.meta.url), "utf8"),

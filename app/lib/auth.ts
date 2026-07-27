@@ -726,7 +726,62 @@ export async function manageUser(request: Request, input: { userId: string; acti
   if (!target) return { ok: false as const, status: 404, message: "User not found." };
   if (target.user_id === session.user.userId) return { ok: false as const, status: 400, message: "Use your account settings to manage the current administrator." };
 
-  if (input.action === "release_device") {
+  if (input.action === "delete_user") {
+    if (target.is_admin) return { ok: false as const, status: 400, message: "Administrator accounts cannot be deleted." };
+    const [classCount, enrolmentCount, attendanceSessionCount, attendanceRecordCount] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS count FROM classroom_classes WHERE faculty_user_id = ?").bind(target.id).first<{ count: number }>(),
+      db.prepare(`SELECT COUNT(*) AS count FROM class_enrolments
+        WHERE student_user_id = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)`)
+        .bind(target.id, target.id).first<{ count: number }>(),
+      db.prepare(`SELECT COUNT(*) AS count FROM attendance_sessions
+        WHERE created_by = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)`)
+        .bind(target.id, target.id).first<{ count: number }>(),
+      db.prepare(`SELECT COUNT(*) AS count FROM attendance_records
+        WHERE student_user_id = ? OR session_id IN (
+          SELECT id FROM attendance_sessions
+          WHERE created_by = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)
+        )`).bind(target.id, target.id, target.id).first<{ count: number }>(),
+    ]);
+    const removed = {
+      classes: Number(classCount?.count ?? 0),
+      enrolments: Number(enrolmentCount?.count ?? 0),
+      attendanceSessions: Number(attendanceSessionCount?.count ?? 0),
+      attendanceRecords: Number(attendanceRecordCount?.count ?? 0),
+    };
+    const results = await db.batch([
+      db.prepare(`DELETE FROM attendance_records
+        WHERE student_user_id = ? OR session_id IN (
+          SELECT id FROM attendance_sessions
+          WHERE created_by = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)
+        )`).bind(target.id, target.id, target.id),
+      db.prepare("UPDATE attendance_records SET corrected_by = NULL WHERE corrected_by = ?").bind(target.id),
+      db.prepare(`DELETE FROM attendance_sessions
+        WHERE created_by = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)`).bind(target.id, target.id),
+      db.prepare(`DELETE FROM class_enrolments
+        WHERE student_user_id = ? OR class_id IN (SELECT id FROM classroom_classes WHERE faculty_user_id = ?)`).bind(target.id, target.id),
+      db.prepare("DELETE FROM classroom_classes WHERE faculty_user_id = ?").bind(target.id),
+      db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(target.id),
+      db.prepare("DELETE FROM auth_device_changes WHERE user_id = ?").bind(target.id),
+      db.prepare("DELETE FROM auth_users WHERE id = ? AND is_admin = 0").bind(target.id),
+    ]);
+    const userDeletion = results.at(-1);
+    if (Number(userDeletion?.meta.changes ?? 0) !== 1) {
+      return { ok: false as const, status: 409, message: "The account could not be deleted." };
+    }
+    await recordAudit(
+      db,
+      session.user.userId,
+      "user_deleted",
+      userId,
+      `${target.role}: ${target.display_name}; ${removed.classes} classes; ${removed.enrolments} enrolments; ${removed.attendanceSessions} sessions; ${removed.attendanceRecords} records`,
+    );
+    return {
+      ok: true as const,
+      deletedUserId: userId,
+      deletedDisplayName: target.display_name,
+      removed,
+    };
+  } else if (input.action === "release_device") {
     if (!isStudentRow(target)) return { ok: false as const, status: 400, message: "Only student accounts use registered-device binding." };
     if (!target.device_hash) return { ok: false as const, status: 400, message: "This student does not currently have a registered device." };
     const changes = await readDeviceChangeState(db, target.id);
