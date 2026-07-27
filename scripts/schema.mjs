@@ -4,6 +4,10 @@ export const schemaStatements = [
     user_id TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('faculty', 'student')),
+    department TEXT NOT NULL DEFAULT '',
+    section TEXT NOT NULL DEFAULT '',
+    roll_number TEXT NOT NULL DEFAULT '',
+    semester TEXT NOT NULL DEFAULT '',
     is_admin INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
     must_change_password INTEGER NOT NULL DEFAULT 1,
@@ -68,6 +72,7 @@ export const schemaStatements = [
     class_id INTEGER NOT NULL REFERENCES classroom_classes(id) ON DELETE CASCADE,
     qr_token TEXT NOT NULL UNIQUE,
     manual_code TEXT NOT NULL UNIQUE,
+    manual_code_enabled INTEGER NOT NULL DEFAULT 0,
     starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
@@ -90,6 +95,7 @@ export const schemaStatements = [
   "CREATE INDEX IF NOT EXISTS auth_audit_created_idx ON auth_audit_log(created_at)",
   "CREATE INDEX IF NOT EXISTS auth_audit_target_idx ON auth_audit_log(target_user_id)",
   "CREATE INDEX IF NOT EXISTS auth_device_changes_user_idx ON auth_device_changes(user_id, created_at)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS auth_users_student_roll_unique ON auth_users(roll_number) WHERE role = 'student' AND roll_number <> ''",
   "CREATE INDEX IF NOT EXISTS classroom_classes_faculty_idx ON classroom_classes(faculty_user_id)",
   "CREATE INDEX IF NOT EXISTS class_enrolments_student_idx ON class_enrolments(student_user_id)",
   "CREATE UNIQUE INDEX IF NOT EXISTS attendance_sessions_active_unique ON attendance_sessions(class_id) WHERE status = 'active'",
@@ -111,13 +117,13 @@ export const tableOrder = [
 ];
 
 export const tableColumns = {
-  auth_users: ["id", "user_id", "display_name", "role", "is_admin", "status", "must_change_password", "password_salt", "password_hash", "device_hash", "device_label", "device_registered_at", "last_login_at", "created_by", "created_at", "updated_at"],
+  auth_users: ["id", "user_id", "display_name", "role", "department", "section", "roll_number", "semester", "is_admin", "status", "must_change_password", "password_salt", "password_hash", "device_hash", "device_label", "device_registered_at", "last_login_at", "created_by", "created_at", "updated_at"],
   auth_sessions: ["token_hash", "user_id", "device_hash", "expires_at", "created_at"],
   auth_audit_log: ["id", "actor_user_id", "action", "target_user_id", "detail", "created_at"],
   auth_system_flags: ["key", "value", "created_at"],
   auth_device_changes: ["id", "user_id", "changed_by", "reason", "created_at"],
   classroom_classes: ["id", "subject_name", "subject_code", "semester", "section", "class_code", "faculty_user_id", "status", "created_at", "updated_at"],
   class_enrolments: ["id", "class_id", "student_user_id", "joined_at"],
-  attendance_sessions: ["id", "class_id", "qr_token", "manual_code", "starts_at", "expires_at", "status", "rotation_seconds", "created_by", "closed_at"],
+  attendance_sessions: ["id", "class_id", "qr_token", "manual_code", "manual_code_enabled", "starts_at", "expires_at", "status", "rotation_seconds", "created_by", "closed_at"],
   attendance_records: ["id", "session_id", "student_user_id", "status", "source", "marked_at", "corrected_by"],
 };

@@ -34,7 +34,12 @@ try {
     const rows = snapshot.tables[table];
     const statements = rows.map((row) => ({
       sql: `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
-      args: columns.map((column) => column === "rotation_seconds" ? row[column] ?? 10 : row[column] ?? null),
+      args: columns.map((column) => {
+        if (column === "rotation_seconds") return row[column] ?? 10;
+        if (column === "manual_code_enabled") return row[column] ?? 0;
+        if (["department", "section", "roll_number", "semester"].includes(column)) return row[column] ?? "";
+        return row[column] ?? null;
+      }),
     }));
     for (let index = 0; index < statements.length; index += 100) {
       await client.batch(statements.slice(index, index + 100), "write");

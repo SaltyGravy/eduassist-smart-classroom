@@ -50,3 +50,38 @@ test("stores the administrator-selected QR rotation interval on each attendance 
   assert.match(modules, /attendanceSession\.rotationSeconds/);
   assert.doesNotMatch(modules, /refreshes every 10 seconds|change every 10 seconds/);
 });
+
+test("stores typed academic profiles and derives the student first-login password", async () => {
+  const [auth, bridge, schema] = await Promise.all([
+    readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/bridge/admin/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/schema.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(auth, /department TEXT NOT NULL DEFAULT ''/);
+  assert.match(auth, /roll_number TEXT NOT NULL DEFAULT ''/);
+  assert.match(auth, /function defaultStudentPassword/);
+  assert.match(auth, /defaultStudentPassword\(displayName, profile\.rollNumber\)/);
+  assert.match(auth, /must_change_password.*1/s);
+  assert.match(bridge, /department: typeof body\.department/);
+  assert.match(bridge, /initialPassword: result\.initialPassword/);
+  assert.match(schema, /auth_users_student_roll_unique/);
+});
+
+test("exports styled department-section workbooks and enables manual codes only on demand", async () => {
+  const [modules, workbook, service, route] = await Promise.all([
+    readFile(new URL("../app/ClassroomModules.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/attendance-workbook.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/classroom.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/classroom/attendance/manual-code/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(modules, /import\("\.\/lib\/attendance-workbook"\)/);
+  assert.match(workbook, /workbook\.addWorksheet/);
+  assert.match(workbook, /FFFEE2E2/);
+  assert.match(workbook, /FFDCFCE7/);
+  assert.match(modules, /Export Excel/);
+  assert.match(modules, /Generate manual code/);
+  assert.match(service, /manual_code_enabled INTEGER NOT NULL DEFAULT 0/);
+  assert.match(service, /manual_code_enabled = 1/);
+  assert.match(service, /s\.manual_code_enabled = 1/);
+  assert.match(route, /enableManualAttendanceCode/);
+});

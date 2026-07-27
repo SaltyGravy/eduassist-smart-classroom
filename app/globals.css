@@ -1257,6 +1257,7 @@ label:focus-within {
 .generated-qr { width: min(270px,80%); height: auto; margin: 17px auto; padding: 11px; border-radius: 15px; background: white; box-shadow: 0 8px 30px rgba(38,46,91,.13); }.generated-qr.disabled { opacity: .23; filter: grayscale(1) blur(1px); }
 .qr-generating { display: grid; width: min(270px,80%); aspect-ratio: 1; place-items: center; margin: 17px auto; border-radius: 15px; color: var(--muted); background: #f1f2ef; font-size: 9px; }
 .session-code.live b { font-size: 14px; letter-spacing: 2px; }
+.manual-code-gate { display:grid; width:100%; gap:7px; padding:12px; border:1px dashed #cfd2db; border-radius:10px; background:#f7f8fa; }.manual-code-gate span { color:var(--muted); font-size:8px; font-weight:800; letter-spacing:.8px; }.manual-code-gate p { margin:0; color:var(--ink); font-size:9.5px; }.manual-code-gate .button { width:max-content; min-height:32px; }
 .live-attendance-panel { padding: 0; overflow: hidden; }
 .live-attendance-panel .roster-summary,.live-attendance-panel .roster-progress,.live-attendance-panel .student-checkins { margin-right: 18px; margin-left: 18px; }
 .student-checkins.live { max-height: 470px; overflow-y: auto; }

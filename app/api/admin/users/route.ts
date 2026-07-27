@@ -13,10 +13,14 @@ export async function POST(request: Request) {
     userId: typeof body.userId === "string" ? body.userId : "",
     displayName: typeof body.displayName === "string" ? body.displayName : "",
     role: typeof body.role === "string" ? body.role : "",
+    department: typeof body.department === "string" ? body.department : "",
+    section: typeof body.section === "string" ? body.section : "",
+    rollNumber: typeof body.rollNumber === "string" ? body.rollNumber : "",
+    semester: typeof body.semester === "string" ? body.semester : "",
     temporaryPassword: typeof body.temporaryPassword === "string" ? body.temporaryPassword : "",
   });
   if (!result.ok) return Response.json({ message: result.message }, { status: result.status });
-  return Response.json({ user: result.user }, { status: 201 });
+  return Response.json({ user: result.user, initialPassword: result.initialPassword }, { status: 201 });
 }
 
 export async function PATCH(request: Request) {
@@ -27,6 +31,10 @@ export async function PATCH(request: Request) {
     userId: typeof body.userId === "string" ? body.userId : "",
     displayName: typeof body.displayName === "string" ? body.displayName : "",
     role: typeof body.role === "string" ? body.role : "",
+    department: typeof body.department === "string" ? body.department : "",
+    section: typeof body.section === "string" ? body.section : "",
+    rollNumber: typeof body.rollNumber === "string" ? body.rollNumber : "",
+    semester: typeof body.semester === "string" ? body.semester : "",
     status: typeof body.status === "string" ? body.status : "",
     mustChangePassword: body.mustChangePassword === true,
   });

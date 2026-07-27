@@ -20,6 +20,10 @@ export type ManagedUser = {
   userId: string;
   displayName: string;
   role: AuthRole;
+  department: string;
+  section: string;
+  rollNumber: string;
+  semester: string;
   status: "active" | "suspended";
   mustChangePassword: boolean;
   deviceRegistered: boolean;
@@ -46,6 +50,10 @@ type UserRow = {
   user_id: string;
   display_name: string;
   role: StoredRole;
+  department: string;
+  section: string;
+  roll_number: string;
+  semester: string;
   is_admin: number;
   status: "active" | "suspended";
   must_change_password: number;
@@ -88,6 +96,10 @@ async function addMissingUserColumns(db: AppDatabase) {
     ["must_change_password", "ALTER TABLE auth_users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1"],
     ["last_login_at", "ALTER TABLE auth_users ADD COLUMN last_login_at TEXT"],
     ["created_by", "ALTER TABLE auth_users ADD COLUMN created_by TEXT"],
+    ["department", "ALTER TABLE auth_users ADD COLUMN department TEXT NOT NULL DEFAULT ''"],
+    ["section", "ALTER TABLE auth_users ADD COLUMN section TEXT NOT NULL DEFAULT ''"],
+    ["roll_number", "ALTER TABLE auth_users ADD COLUMN roll_number TEXT NOT NULL DEFAULT ''"],
+    ["semester", "ALTER TABLE auth_users ADD COLUMN semester TEXT NOT NULL DEFAULT ''"],
   ] as const;
   for (const [name, statement] of additions) {
     if (!columns.has(name)) {
@@ -109,6 +121,10 @@ async function initializeAuthSchema() {
       user_id TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       role TEXT NOT NULL CHECK (role IN ('faculty', 'student')),
+      department TEXT NOT NULL DEFAULT '',
+      section TEXT NOT NULL DEFAULT '',
+      roll_number TEXT NOT NULL DEFAULT '',
+      semester TEXT NOT NULL DEFAULT '',
       is_admin INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'active',
       must_change_password INTEGER NOT NULL DEFAULT 1,
@@ -158,6 +174,7 @@ async function initializeAuthSchema() {
     db.prepare("CREATE INDEX IF NOT EXISTS auth_device_changes_user_idx ON auth_device_changes(user_id, created_at)"),
   ]);
   await addMissingUserColumns(db);
+  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS auth_users_student_roll_unique ON auth_users(roll_number) WHERE role = 'student' AND roll_number <> ''").run();
 
   const bootstrapAccounts = [
     {
@@ -328,6 +345,10 @@ function managedUser(row: ManagedUserRow): ManagedUser {
     userId: row.user_id,
     displayName: row.display_name,
     role: roleForRow(row),
+    department: row.department,
+    section: row.section,
+    rollNumber: row.roll_number,
+    semester: row.semester,
     status: row.status,
     mustChangePassword: Boolean(row.must_change_password),
     deviceRegistered: student && Boolean(row.device_hash),
@@ -548,7 +569,46 @@ export async function listManagedUsers(request: Request) {
   return { actor: session.user, users: (result.results as ManagedUserRow[]).map(managedUser) };
 }
 
-export async function createManagedUser(request: Request, input: { userId: string; displayName: string; role: string; temporaryPassword: string }) {
+function normalizeAcademicField(value: string, maximum: number, uppercase = false) {
+  const cleaned = value.replace(/[<>\r\n]/g, "").trim().replace(/\s+/g, " ").slice(0, maximum);
+  return uppercase ? cleaned.toUpperCase() : cleaned;
+}
+
+function academicProfile(input: { department: string; section: string; rollNumber: string; semester: string }, role: AuthRole) {
+  const department = normalizeAcademicField(input.department, 40, true);
+  const section = normalizeAcademicField(input.section, 12, true);
+  const rollNumber = normalizeAcademicField(input.rollNumber, 30, true).replace(/\s/g, "");
+  const semester = normalizeAcademicField(input.semester, 30);
+  if (role !== "admin" && !/^[A-Z0-9][A-Z0-9 &.-]{1,39}$/.test(department)) {
+    return { ok: false as const, status: 400, message: "Enter a valid department." };
+  }
+  if (role === "student") {
+    if (!/^[A-Z0-9][A-Z0-9-]{0,11}$/.test(section)) return { ok: false as const, status: 400, message: "Enter a valid student section." };
+    if (!/^[A-Z0-9][A-Z0-9_/-]{1,29}$/.test(rollNumber)) return { ok: false as const, status: 400, message: "Enter a valid student roll number." };
+    if (!semester) return { ok: false as const, status: 400, message: "Enter the student's semester." };
+  }
+  return { ok: true as const, department, section, rollNumber, semester };
+}
+
+function defaultStudentPassword(displayName: string, rollNumber: string) {
+  const firstName = displayName.split(/\s+/)[0]
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toLowerCase();
+  return `${firstName}${rollNumber}`;
+}
+
+export async function createManagedUser(request: Request, input: {
+  userId: string;
+  displayName: string;
+  role: string;
+  department: string;
+  section: string;
+  rollNumber: string;
+  semester: string;
+  temporaryPassword: string;
+}) {
   const session = await getAdminSession(request);
   if (!session) return { ok: false as const, status: 403, message: "Administrator access is required." };
   const userId = normalizeUserId(input.userId);
@@ -556,18 +616,34 @@ export async function createManagedUser(request: Request, input: { userId: strin
   if (!/^[A-Z0-9_-]{3,20}$/.test(userId)) return { ok: false as const, status: 400, message: "User ID must be 3–20 letters, numbers, hyphens, or underscores." };
   if (input.role !== "faculty" && input.role !== "student") return { ok: false as const, status: 400, message: "Choose Faculty or Student." };
   if (displayName.length < 2) return { ok: false as const, status: 400, message: "Enter the user's full name." };
-  const passwordError = validatePassword(input.temporaryPassword);
-  if (passwordError) return { ok: false as const, status: 400, message: passwordError };
+  const profile = academicProfile(input, input.role);
+  if (!profile.ok) return profile;
+  const initialPassword = input.role === "student"
+    ? defaultStudentPassword(displayName, profile.rollNumber)
+    : input.temporaryPassword;
+  if (input.role === "faculty") {
+    const passwordError = validatePassword(initialPassword);
+    if (passwordError) return { ok: false as const, status: 400, message: passwordError };
+  }
+  if (!initialPassword) return { ok: false as const, status: 400, message: "The student default password could not be generated." };
 
   const db = await getAuthDb();
   const existing = await db.prepare("SELECT id FROM auth_users WHERE user_id = ?").bind(userId).first();
   if (existing) return { ok: false as const, status: 409, message: "That user ID already exists." };
+  if (input.role === "student") {
+    const duplicateRoll = await db.prepare("SELECT id FROM auth_users WHERE role = 'student' AND roll_number = ?").bind(profile.rollNumber).first();
+    if (duplicateRoll) return { ok: false as const, status: 409, message: "That student roll number already exists." };
+  }
   const salt = randomToken().slice(0, 32);
-  const hash = await derivePassword(input.temporaryPassword, salt);
-  await db.prepare(`INSERT INTO auth_users (user_id, display_name, role, is_admin, status, must_change_password, password_salt, password_hash, created_by) VALUES (?, ?, ?, 0, 'active', 1, ?, ?, ?)`).bind(userId, displayName, input.role, salt, hash, session.user.userId).run();
-  await recordAudit(db, session.user.userId, "user_created", userId, `${input.role}: ${displayName}`);
+  const hash = await derivePassword(initialPassword, salt);
+  await db.prepare(`INSERT INTO auth_users
+    (user_id, display_name, role, department, section, roll_number, semester, is_admin, status, must_change_password, password_salt, password_hash, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', 1, ?, ?, ?)`)
+    .bind(userId, displayName, input.role, profile.department, profile.section, profile.rollNumber, profile.semester, salt, hash, session.user.userId)
+    .run();
+  await recordAudit(db, session.user.userId, "user_created", userId, `${input.role}: ${displayName}; ${profile.department}${profile.section ? `-${profile.section}` : ""}${profile.rollNumber ? `; ${profile.rollNumber}` : ""}`);
   const row = (await db.prepare("SELECT * FROM auth_users WHERE user_id = ?").bind(userId).first()) as UserRow;
-  return { ok: true as const, user: managedUser(row) };
+  return { ok: true as const, user: managedUser(row), initialPassword: input.role === "student" ? initialPassword : null };
 }
 
 export async function editManagedUser(request: Request, input: {
@@ -575,6 +651,10 @@ export async function editManagedUser(request: Request, input: {
   userId: string;
   displayName: string;
   role: string;
+  department: string;
+  section: string;
+  rollNumber: string;
+  semester: string;
   status: string;
   mustChangePassword: boolean;
 }) {
@@ -593,6 +673,8 @@ export async function editManagedUser(request: Request, input: {
   const nextRole = target.is_admin ? target.role : input.role;
   if (!target.is_admin && nextRole !== "faculty" && nextRole !== "student") return { ok: false as const, status: 400, message: "Choose Faculty or Student." };
   if (target.user_id === session.user.userId && input.status !== "active") return { ok: false as const, status: 400, message: "You cannot suspend the administrator account currently in use." };
+  const profile = academicProfile(input, target.is_admin ? "admin" : nextRole as StoredRole);
+  if (!profile.ok) return profile;
 
   if (!target.is_admin && target.role !== nextRole) {
     const related = target.role === "faculty"
@@ -603,14 +685,32 @@ export async function editManagedUser(request: Request, input: {
 
   const duplicate = await db.prepare("SELECT id FROM auth_users WHERE user_id = ? AND id <> ?").bind(userId, target.id).first();
   if (duplicate) return { ok: false as const, status: 409, message: "That user ID already exists." };
-  await db.prepare(`UPDATE auth_users SET user_id = ?, display_name = ?, role = ?, status = ?, must_change_password = ?,
+  if (!target.is_admin && nextRole === "student") {
+    const duplicateRoll = await db.prepare("SELECT id FROM auth_users WHERE role = 'student' AND roll_number = ? AND id <> ?").bind(profile.rollNumber, target.id).first();
+    if (duplicateRoll) return { ok: false as const, status: 409, message: "That student roll number already exists." };
+  }
+  await db.prepare(`UPDATE auth_users SET user_id = ?, display_name = ?, role = ?, department = ?, section = ?, roll_number = ?, semester = ?, status = ?, must_change_password = ?,
     device_hash = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_hash ELSE NULL END,
     device_label = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_label ELSE NULL END,
     device_registered_at = CASE WHEN ? = 'student' AND is_admin = 0 THEN device_registered_at ELSE NULL END,
     updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-    .bind(userId, displayName, nextRole, input.status, input.mustChangePassword ? 1 : 0, nextRole, nextRole, nextRole, target.id).run();
+    .bind(
+      userId,
+      displayName,
+      nextRole,
+      profile.department,
+      profile.section,
+      profile.rollNumber,
+      profile.semester,
+      input.status,
+      input.mustChangePassword ? 1 : 0,
+      nextRole,
+      nextRole,
+      nextRole,
+      target.id,
+    ).run();
   if (input.status === "suspended") await db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(target.id).run();
-  await recordAudit(db, session.user.userId, "user_edited", userId, `${originalUserId} → ${userId}; ${displayName}; ${roleForRow(target)} → ${target.is_admin ? "admin" : nextRole}; ${input.status}`);
+  await recordAudit(db, session.user.userId, "user_edited", userId, `${originalUserId} → ${userId}; ${displayName}; ${roleForRow(target)} → ${target.is_admin ? "admin" : nextRole}; ${profile.department}${profile.section ? `-${profile.section}` : ""}; ${input.status}`);
   const row = await db.prepare(`SELECT u.*, COUNT(dc.id) AS device_changes_used, MIN(dc.created_at) AS oldest_device_change
     FROM auth_users u LEFT JOIN auth_device_changes dc ON dc.user_id = u.id AND dc.created_at >= datetime('now', '-6 months')
     WHERE u.id = ? GROUP BY u.id`).bind(target.id).first() as ManagedUserRow;

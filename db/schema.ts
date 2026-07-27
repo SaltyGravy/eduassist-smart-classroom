@@ -1,24 +1,34 @@
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export const authUsers = sqliteTable("auth_users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: text("user_id").notNull().unique(),
-  displayName: text("display_name").notNull(),
-  role: text("role", { enum: ["faculty", "student"] }).notNull(),
-  isAdmin: integer("is_admin").notNull().default(0),
-  status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
-  mustChangePassword: integer("must_change_password").notNull().default(1),
-  passwordSalt: text("password_salt").notNull(),
-  passwordHash: text("password_hash").notNull(),
-  deviceHash: text("device_hash"),
-  deviceLabel: text("device_label"),
-  deviceRegisteredAt: text("device_registered_at"),
-  lastLoginAt: text("last_login_at"),
-  createdBy: text("created_by"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+export const authUsers = sqliteTable(
+  "auth_users",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: text("user_id").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    role: text("role", { enum: ["faculty", "student"] }).notNull(),
+    department: text("department").notNull().default(""),
+    section: text("section").notNull().default(""),
+    rollNumber: text("roll_number").notNull().default(""),
+    semester: text("semester").notNull().default(""),
+    isAdmin: integer("is_admin").notNull().default(0),
+    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+    mustChangePassword: integer("must_change_password").notNull().default(1),
+    passwordSalt: text("password_salt").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    deviceHash: text("device_hash"),
+    deviceLabel: text("device_label"),
+    deviceRegisteredAt: text("device_registered_at"),
+    lastLoginAt: text("last_login_at"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("auth_users_student_roll_unique").on(table.rollNumber).where(sql`${table.role} = 'student' AND ${table.rollNumber} <> ''`),
+  ],
+);
 
 export const authSessions = sqliteTable(
   "auth_sessions",
@@ -112,9 +122,11 @@ export const attendanceSessions = sqliteTable(
     classId: integer("class_id").notNull().references(() => classroomClasses.id, { onDelete: "cascade" }),
     qrToken: text("qr_token").notNull(),
     manualCode: text("manual_code").notNull(),
+    manualCodeEnabled: integer("manual_code_enabled").notNull().default(0),
     startsAt: text("starts_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     expiresAt: text("expires_at").notNull(),
     status: text("status", { enum: ["active", "closed"] }).notNull().default("active"),
+    rotationSeconds: integer("rotation_seconds").notNull().default(10),
     createdBy: integer("created_by").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
     closedAt: text("closed_at"),
   },

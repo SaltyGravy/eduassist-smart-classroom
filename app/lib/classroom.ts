@@ -42,6 +42,7 @@ type SessionRow = {
   class_id: number;
   qr_token: string;
   manual_code: string;
+  manual_code_enabled: number;
   starts_at: string;
   expires_at: string;
   status: "active" | "closed";
@@ -88,6 +89,7 @@ async function initializeClassroomSchema() {
       class_id INTEGER NOT NULL,
       qr_token TEXT NOT NULL UNIQUE,
       manual_code TEXT NOT NULL UNIQUE,
+      manual_code_enabled INTEGER NOT NULL DEFAULT 0,
       starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       expires_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
@@ -118,11 +120,18 @@ async function initializeClassroomSchema() {
     db.prepare("CREATE INDEX IF NOT EXISTS attendance_records_student_idx ON attendance_records(student_user_id)"),
   ]);
   const attendanceColumns = await db.prepare("PRAGMA table_info(attendance_sessions)").all<{ name: string }>();
-  if (!attendanceColumns.results.some((column) => column.name === "rotation_seconds")) {
-    try {
-      await db.prepare("ALTER TABLE attendance_sessions ADD COLUMN rotation_seconds INTEGER NOT NULL DEFAULT 10").run();
-    } catch (error) {
-      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+  const existingAttendanceColumns = new Set(attendanceColumns.results.map((column) => column.name));
+  const attendanceAdditions = [
+    ["rotation_seconds", "ALTER TABLE attendance_sessions ADD COLUMN rotation_seconds INTEGER NOT NULL DEFAULT 10"],
+    ["manual_code_enabled", "ALTER TABLE attendance_sessions ADD COLUMN manual_code_enabled INTEGER NOT NULL DEFAULT 0"],
+  ] as const;
+  for (const [name, statement] of attendanceAdditions) {
+    if (!existingAttendanceColumns.has(name)) {
+      try {
+        await db.prepare(statement).run();
+      } catch (error) {
+        if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+      }
     }
   }
 }
@@ -435,7 +444,8 @@ async function publicAttendanceSession(row: SessionRow) {
     expiresAt: row.expires_at,
     status: row.status,
     rotationSeconds: interval / 1000,
-    manualCode: credential.manualCode,
+    manualCodeEnabled: Boolean(row.manual_code_enabled),
+    manualCode: row.manual_code_enabled ? credential.manualCode : null,
     qrPayload,
     qrExpiresAt,
   };
@@ -537,6 +547,22 @@ export async function getActiveAttendanceSession(request: Request, classId: numb
   return getAttendanceSession(request, Number(active.id));
 }
 
+export async function enableManualAttendanceCode(request: Request, sessionId: number) {
+  const session = await getAuthorizedSession(request, ["faculty"]);
+  if (!session) return { ok: false as const, status: 403, message: "Faculty access is required." };
+  const db = await getClassroomDb();
+  const row = await readSessionRow(db, sessionId);
+  if (!row || !(await getOwnedClass(db, row.class_id, session.databaseUserId))) {
+    return { ok: false as const, status: 404, message: "Attendance session not found." };
+  }
+  if (row.status !== "active" || new Date(`${row.expires_at.replace(" ", "T")}Z`).getTime() <= Date.now()) {
+    return { ok: false as const, status: 409, message: "Manual codes can only be generated for an active attendance session." };
+  }
+  await db.prepare("UPDATE attendance_sessions SET manual_code_enabled = 1 WHERE id = ?").bind(sessionId).run();
+  const refreshed = await readSessionRow(db, sessionId) as SessionRow;
+  return { ok: true as const, attendanceSession: await publicAttendanceSession(refreshed) };
+}
+
 export async function markAttendance(request: Request, credentialInput: string) {
   const session = await getAuthorizedSession(request, ["student"]);
   if (!session) return { ok: false as const, status: 403, message: "Student access is required." };
@@ -563,7 +589,7 @@ export async function markAttendance(request: Request, credentialInput: string) 
   } else if (credential.source === "manual") {
     const active = await db.prepare(`SELECT s.*, c.subject_name, c.subject_code, c.semester, c.section
       FROM attendance_sessions s JOIN classroom_classes c ON c.id = s.class_id
-      WHERE s.status = 'active' AND s.expires_at > CURRENT_TIMESTAMP`).all();
+      WHERE s.status = 'active' AND s.manual_code_enabled = 1 AND s.expires_at > CURRENT_TIMESTAMP`).all();
     for (const candidate of active.results as SessionRow[]) {
       for (const rotation of acceptedRotations(candidate)) {
         const expected = await rotatingCredential(candidate, rotation);
@@ -648,8 +674,9 @@ export async function getReports(request: Request, requestedClassId?: number) {
   const ownedClasses = await listClasses(request);
   const classes = ownedClasses?.classes ?? [];
   const selectedClass = classes.find((item) => item.id === requestedClassId) ?? classes[0] ?? null;
-  if (!selectedClass) return { role: "faculty" as const, classes, selectedClass: null, students: [], sessions: [], summary: { totalSessions: 0, averageAttendance: null, totalStudents: 0 } };
+  if (!selectedClass) return { role: "faculty" as const, classes, selectedClass: null, students: [], sessions: [], attendance: [], summary: { totalSessions: 0, averageAttendance: null, totalStudents: 0 } };
   const historyResult = await db.prepare(`SELECT s.id AS session_id, s.starts_at, u.user_id, u.display_name,
+      u.department, u.section AS student_section, u.roll_number, u.semester AS student_semester,
       COALESCE(r.status, 'absent') AS attendance_status, r.marked_at
     FROM attendance_sessions s
     JOIN class_enrolments e ON e.class_id = s.class_id
@@ -657,20 +684,51 @@ export async function getReports(request: Request, requestedClassId?: number) {
     LEFT JOIN attendance_records r ON r.session_id = s.id AND r.student_user_id = e.student_user_id
     WHERE s.class_id = ? AND s.status = 'closed'
     ORDER BY s.starts_at DESC, u.display_name ASC`).bind(selectedClass.id).all();
-  const enrolledResult = await db.prepare(`SELECT u.user_id, u.display_name
+  const enrolledResult = await db.prepare(`SELECT u.user_id, u.display_name, u.department,
+      u.section AS student_section, u.roll_number, u.semester AS student_semester
     FROM class_enrolments e JOIN auth_users u ON u.id = e.student_user_id
     WHERE e.class_id = ? ORDER BY u.display_name ASC`).bind(selectedClass.id).all();
   const rows = historyResult.results as Array<Record<string, unknown>>;
-  const studentsMap = new Map<string, { userId: string; displayName: string; present: number; late: number; absent: number }>();
+  const studentsMap = new Map<string, {
+    userId: string;
+    displayName: string;
+    department: string;
+    section: string;
+    rollNumber: string;
+    semester: string;
+    present: number;
+    late: number;
+    absent: number;
+  }>();
   const sessionsMap = new Map<number, { id: number; startsAt: string; present: number; late: number; absent: number }>();
   for (const row of enrolledResult.results as Array<Record<string, unknown>>) {
     const userId = String(row.user_id);
-    studentsMap.set(userId, { userId, displayName: String(row.display_name), present: 0, late: 0, absent: 0 });
+    studentsMap.set(userId, {
+      userId,
+      displayName: String(row.display_name),
+      department: String(row.department ?? ""),
+      section: String(row.student_section ?? ""),
+      rollNumber: String(row.roll_number ?? ""),
+      semester: String(row.student_semester ?? ""),
+      present: 0,
+      late: 0,
+      absent: 0,
+    });
   }
   for (const row of rows) {
     const userId = String(row.user_id);
     const status = String(row.attendance_status) as AttendanceStatus;
-    const student = studentsMap.get(userId) ?? { userId, displayName: String(row.display_name), present: 0, late: 0, absent: 0 };
+    const student = studentsMap.get(userId) ?? {
+      userId,
+      displayName: String(row.display_name),
+      department: String(row.department ?? ""),
+      section: String(row.student_section ?? ""),
+      rollNumber: String(row.roll_number ?? ""),
+      semester: String(row.student_semester ?? ""),
+      present: 0,
+      late: 0,
+      absent: 0,
+    };
     student[status] += 1;
     studentsMap.set(userId, student);
     const sessionId = Number(row.session_id);
@@ -686,6 +744,12 @@ export async function getReports(request: Request, requestedClassId?: number) {
     attendanceRate: totalSessions ? Math.round(((student.present + student.late) / totalSessions) * 100) : null,
   }));
   const sessions = Array.from(sessionsMap.values()).map((item) => ({ ...item, total: item.present + item.late + item.absent, attendanceRate: item.present + item.late + item.absent ? Math.round(((item.present + item.late) / (item.present + item.late + item.absent)) * 100) : null }));
+  const attendance = rows.map((row) => ({
+    sessionId: Number(row.session_id),
+    startsAt: String(row.starts_at),
+    userId: String(row.user_id),
+    status: String(row.attendance_status) as AttendanceStatus,
+  }));
   const averageAttendance = students.length && totalSessions ? Math.round(students.reduce((sum, item) => sum + (item.attendanceRate ?? 0), 0) / students.length) : null;
-  return { role: "faculty" as const, classes, selectedClass, students, sessions, summary: { totalSessions, averageAttendance, totalStudents: selectedClass.studentCount } };
+  return { role: "faculty" as const, classes, selectedClass, students, sessions, attendance, summary: { totalSessions, averageAttendance, totalStudents: selectedClass.studentCount } };
 }
