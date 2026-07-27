@@ -425,6 +425,24 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
     finally { setBusy(false); }
   }
 
+  async function downloadClosedSession() {
+    if (!selected || !attendanceSession || attendanceSession.status !== "closed") return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/classroom/reports?classId=${selected.id}`, { cache: "no-store", headers: requestHeaders(deviceId) });
+      const report = await resultJson<FacultyReport>(response);
+      await downloadFacultyWorkbook(report, {
+        sessionIds: [attendanceSession.id],
+        filenameSuffix: `${dateInputValue(attendanceSession.startsAt)}-session-${attendanceSession.id}`,
+      });
+      onNotify("Attendance Excel downloaded for the closed session.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The attendance Excel file could not be downloaded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function correct(studentUserId: string, status: string) {
     if (!attendanceSession) return;
     try {
@@ -531,7 +549,7 @@ export function LiveAttendanceView({ role, classes, deviceId, onNotify }: { role
 
   return <section className="page-stack live-attendance-faculty"><div className="section-title-row"><div><span className="eyebrow">SECURE ATTENDANCE</span><h2>QR attendance session</h2><p>Show an automatically rotating QR and monitor check-ins live.</p></div><select className="module-class-select" value={selected.id} onChange={(event) => { setSelectedClassId(Number(event.target.value)); setAttendanceSession(null); setRoster([]); }} aria-label="Choose class">{classes.map((item) => <option key={item.id} value={item.id}>{item.subjectCode} · Section {item.section}</option>)}</select></div>
     {error ? <div className="module-error">! {error}</div> : null}
-    {!attendanceSession ? <form className="start-attendance-panel" onSubmit={start}><div><span className="eyebrow">{selected.subjectCode} · {selected.semester}</span><h3>{selected.subjectName}</h3><p>{selected.studentCount} enrolled students · Uses the administrator&apos;s QR rotation setting</p></div><label>Session duration<select name="durationMinutes" defaultValue="4"><option value="2">2 minutes</option><option value="3">3 minutes</option><option value="4">4 minutes</option><option value="5">5 minutes</option></select></label><button className="button primary" disabled={busy}>◫ {busy ? "Starting…" : "Generate secure QR"}</button></form> : <div className="attendance-layout"><div className="panel qr-panel live-qr-panel"><div className="qr-header"><div><span className={attendanceSession.status === "active" ? "status-pill success" : "status-pill waiting"}>{attendanceSession.status === "active" ? "● Session active" : "○ Session closed"}</span><h3>{attendanceSession.subjectName}</h3><p>{attendanceSession.subjectCode} · Section {attendanceSession.section}</p></div><div className="timer"><span>{attendanceSession.status === "active" ? "EXPIRES IN" : "SESSION"}</span><b>{attendanceSession.status === "active" ? `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}` : "CLOSED"}</b></div></div>{qrDataUrl ? <Image unoptimized width={360} height={360} className={attendanceSession.status === "active" ? "generated-qr" : "generated-qr disabled"} src={qrDataUrl} alt={`Attendance QR for ${attendanceSession.subjectCode}`} /> : <div className="qr-generating">Generating secure QR…</div>}<div className="qr-rotation-status"><span>LIVE ROTATION · {attendanceSession.rotationSeconds}s interval</span><b>{attendanceSession.status === "active" ? `New QR in ${rotationSeconds}s` : "Stopped"}</b></div>{attendanceSession.manualCodeEnabled && attendanceSession.manualCode ? <div className="session-code live"><span>MANUAL CODE</span><b>{attendanceSession.manualCode}</b><button onClick={() => { void navigator.clipboard?.writeText(attendanceSession.manualCode ?? ""); onNotify("Attendance code copied."); }}>Copy</button></div> : attendanceSession.status === "active" ? <div className="manual-code-gate"><span>CAMERA FALLBACK</span><p>No manual code is active.</p><button className="button outline" onClick={() => void generateManualCode()} disabled={busy}>{busy ? "Generating…" : "Generate manual code"}</button></div> : null}<p className="secure-note">⌾ The QR rotates automatically. A manual code is created only when you request it.</p>{attendanceSession.status === "active" ? <button className="button danger full" onClick={() => void close()} disabled={busy}>Close & save attendance</button> : <button className="button primary full" onClick={() => { setAttendanceSession(null); setRoster([]); }}>Start another session</button>}</div>
+    {!attendanceSession ? <form className="start-attendance-panel" onSubmit={start}><div><span className="eyebrow">{selected.subjectCode} · {selected.semester}</span><h3>{selected.subjectName}</h3><p>{selected.studentCount} enrolled students · Uses the administrator&apos;s QR rotation setting</p></div><label>Session duration<select name="durationMinutes" defaultValue="4"><option value="2">2 minutes</option><option value="3">3 minutes</option><option value="4">4 minutes</option><option value="5">5 minutes</option></select></label><button className="button primary" disabled={busy}>◫ {busy ? "Starting…" : "Generate secure QR"}</button></form> : <div className="attendance-layout"><div className="panel qr-panel live-qr-panel"><div className="qr-header"><div><span className={attendanceSession.status === "active" ? "status-pill success" : "status-pill waiting"}>{attendanceSession.status === "active" ? "● Session active" : "○ Session closed"}</span><h3>{attendanceSession.subjectName}</h3><p>{attendanceSession.subjectCode} · Section {attendanceSession.section}</p></div><div className="timer"><span>{attendanceSession.status === "active" ? "EXPIRES IN" : "SESSION"}</span><b>{attendanceSession.status === "active" ? `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}` : "CLOSED"}</b></div></div>{qrDataUrl ? <Image unoptimized width={360} height={360} className={attendanceSession.status === "active" ? "generated-qr" : "generated-qr disabled"} src={qrDataUrl} alt={`Attendance QR for ${attendanceSession.subjectCode}`} /> : <div className="qr-generating">Generating secure QR…</div>}<div className="qr-rotation-status"><span>LIVE ROTATION · {attendanceSession.rotationSeconds}s interval</span><b>{attendanceSession.status === "active" ? `New QR in ${rotationSeconds}s` : "Stopped"}</b></div>{attendanceSession.manualCodeEnabled && attendanceSession.manualCode ? <div className="session-code live"><span>MANUAL CODE</span><b>{attendanceSession.manualCode}</b><button onClick={() => { void navigator.clipboard?.writeText(attendanceSession.manualCode ?? ""); onNotify("Attendance code copied."); }}>Copy</button></div> : attendanceSession.status === "active" ? <div className="manual-code-gate"><span>CAMERA FALLBACK</span><p>No manual code is active.</p><button className="button outline" onClick={() => void generateManualCode()} disabled={busy}>{busy ? "Generating…" : "Generate manual code"}</button></div> : null}<p className="secure-note">⌾ The QR rotates automatically. A manual code is created only when you request it.</p>{attendanceSession.status === "active" ? <button className="button danger full" onClick={() => void close()} disabled={busy}>Close & save attendance</button> : <div className="closed-session-actions"><button className="button outline full" onClick={() => void downloadClosedSession()} disabled={busy}>{busy ? "Building workbook…" : "Download this attendance ↓"}</button><button className="button primary full" onClick={() => { setAttendanceSession(null); setRoster([]); }} disabled={busy}>Start another session</button></div>}</div>
       <div className="panel live-attendance-panel"><div className="live-roster-header"><div><span className="eyebrow">LIVE ROSTER</span><h3>Student check-ins</h3></div><button onClick={() => void loadSession(attendanceSession.id)}>Refresh</button></div><div className="roster-summary"><div><b>{markedCount}<span>/ {roster.length}</span></b><p>Students attended</p></div><span className="trend-pill">{roster.length ? `${Math.round((markedCount / roster.length) * 100)}%` : "No students"}</span></div><div className="roster-progress"><i style={{ width: roster.length ? `${(markedCount / roster.length) * 100}%` : "0%" }} /></div><div className="student-checkins live">{roster.map((student, index) => <div key={student.userId}><span className={`student-avatar a${index % 5}`}>{personInitials(student.displayName)}</span><div><b>{student.displayName}</b><p>{student.userId}{student.markedAt ? ` · ${dateLabel(student.markedAt)}` : ""}</p></div><select value={student.status} onChange={(event) => void correct(student.userId, event.target.value)} aria-label={`Attendance status for ${student.displayName}`}><option value="pending" disabled>Pending</option><option value="present">Present</option><option value="late">Late</option><option value="absent">Absent</option></select><span className={`attendance-state ${student.status}`}>{student.status === "present" ? "✓" : student.status === "late" ? "◷" : student.status === "absent" ? "×" : "—"}</span></div>)}</div></div></div>}
   </section>;
 }
@@ -548,16 +566,29 @@ function downloadCsv(filename: string, rows: Array<Array<string | number | null>
   const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
 }
 
-async function downloadFacultyWorkbook(data: FacultyReport) {
+function dateInputValue(value: string) {
+  const date = parseUtcDate(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function downloadFacultyWorkbook(data: FacultyReport, options: { sessionIds?: number[]; filenameSuffix?: string } = {}) {
   if (!data.selectedClass) return;
-  const { buildFacultyAttendanceWorkbook } = await import("./lib/attendance-workbook");
-  const buffer = await buildFacultyAttendanceWorkbook({ ...data, selectedClass: data.selectedClass });
+  const { buildFacultyAttendanceWorkbook, selectAttendanceSessions } = await import("./lib/attendance-workbook");
+  const completeData = { ...data, selectedClass: data.selectedClass };
+  const workbookData = options.sessionIds ? selectAttendanceSessions(completeData, options.sessionIds) : completeData;
+  if (!workbookData.sessions.length && options.sessionIds) throw new Error("No completed attendance session was found for that selection.");
+  const buffer = await buildFacultyAttendanceWorkbook(workbookData);
   const url = URL.createObjectURL(new Blob([buffer as BlobPart], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${data.selectedClass.subjectCode}-attendance.xlsx`;
+  const suffix = options.filenameSuffix ? `-${options.filenameSuffix}` : "";
+  link.download = `${data.selectedClass.subjectCode}-attendance${suffix}.xlsx`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -567,17 +598,36 @@ export function LiveReportsView({ role, classes, deviceId }: { role: Role; class
   const [report, setReport] = useState<FacultyReport | StudentReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [selectedReportDate, setSelectedReportDate] = useState("");
+  const [exportError, setExportError] = useState("");
   const [error, setError] = useState("");
   const effectiveClassId = selectedClassId || classes[0]?.id || 0;
 
   async function exportFacultyReport() {
     const data = report as FacultyReport | null;
     if (!data?.selectedClass) return;
-    setExporting(true); setError("");
+    setExporting(true); setExportError("");
     try {
       await downloadFacultyWorkbook(data);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The Excel attendance workbook could not be created.");
+      setExportError(reason instanceof Error ? reason.message : "The Excel attendance workbook could not be created.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function exportSelectedDate() {
+    const data = report as FacultyReport | null;
+    if (!data?.selectedClass || !selectedReportDate) return;
+    const sessionIds = data.sessions
+      .filter((session) => dateInputValue(session.startsAt) === selectedReportDate)
+      .map((session) => session.id);
+    if (!sessionIds.length) return;
+    setExporting(true); setExportError("");
+    try {
+      await downloadFacultyWorkbook(data, { sessionIds, filenameSuffix: selectedReportDate });
+    } catch (reason) {
+      setExportError(reason instanceof Error ? reason.message : "Attendance for the selected date could not be downloaded.");
     } finally {
       setExporting(false);
     }
@@ -591,7 +641,15 @@ export function LiveReportsView({ role, classes, deviceId }: { role: Role; class
         const suffix = role === "faculty" && effectiveClassId ? `?classId=${effectiveClassId}` : "";
         const response = await fetch(`/api/classroom/reports${suffix}`, { cache: "no-store", headers: requestHeaders(deviceId) });
         const result = await resultJson<FacultyReport | StudentReport>(response);
-        if (active) { setReport(result); setError(""); }
+        if (active) {
+          setReport(result);
+          setError("");
+          setExportError("");
+          if (result.role === "faculty") {
+            const availableDates = Array.from(new Set(result.sessions.map((session) => dateInputValue(session.startsAt))).values()).filter(Boolean).sort();
+            setSelectedReportDate((current) => current && availableDates.includes(current) ? current : availableDates.at(-1) ?? "");
+          }
+        }
       } catch (reason) { if (active) setError(reason instanceof Error ? reason.message : "Reports could not be loaded."); }
       finally { if (active) setLoading(false); }
     }
@@ -611,7 +669,10 @@ export function LiveReportsView({ role, classes, deviceId }: { role: Role; class
   }
 
   const data = report as FacultyReport;
+  const availableReportDates = Array.from(new Set(data.sessions.map((session) => dateInputValue(session.startsAt))).values()).filter(Boolean).sort();
+  const selectedDateSessions = data.sessions.filter((session) => dateInputValue(session.startsAt) === selectedReportDate);
   return <section className="page-stack live-report-page"><div className="section-title-row"><div><span className="eyebrow">CLASS REPORTING</span><h2>Attendance reports</h2><p>Review session trends, student percentages, and downloadable records.</p></div><div className="report-actions"><select className="module-class-select" value={data.selectedClass?.id ?? effectiveClassId} onChange={(event) => setSelectedClassId(Number(event.target.value))} aria-label="Choose report class">{classes.map((item) => <option key={item.id} value={item.id}>{item.subjectCode} · {item.section}</option>)}</select><button className="button outline" disabled={!data.selectedClass || exporting} onClick={() => void exportFacultyReport()}>{exporting ? "Building workbook…" : "Export Excel ↓"}</button></div></div>
-    {!data.selectedClass ? <EmptyModule icon="↗" title="No classes to report" detail="Create a class, enrol students, and complete a QR attendance session." /> : <><div className="report-summary-grid faculty"><article><span>✓</span><p><b>{data.summary.averageAttendance === null ? "—" : `${data.summary.averageAttendance}%`}</b><small>Class average</small></p></article><article><span>♙</span><p><b>{data.summary.totalStudents}</b><small>Enrolled students</small></p></article><article><span>◷</span><p><b>{data.summary.totalSessions}</b><small>Completed sessions</small></p></article><article><span>▣</span><p><b>{data.selectedClass.subjectCode}</b><small>Section {data.selectedClass.section}</small></p></article></div><div className="report-dashboard-grid"><article className="panel report-trend-card"><div className="live-roster-title"><div><span className="eyebrow">RECENT SESSIONS</span><h3>Attendance trend</h3></div></div><div className="real-bar-chart">{data.sessions.slice(0, 8).reverse().map((item) => <div key={item.id}><span>{item.attendanceRate ?? 0}%</span><i><b style={{ height: `${item.attendanceRate ?? 0}%` }} /></i><small>{dateLabel(item.startsAt, false).replace(/\s\d{4}/, "")}</small></div>)}{!data.sessions.length ? <p>No completed sessions yet.</p> : null}</div></article><article className="panel session-breakdown"><div className="live-roster-title"><div><span className="eyebrow">LAST 8 SESSIONS</span><h3>Session breakdown</h3></div></div>{data.sessions.slice(0, 8).map((item) => <div key={item.id}><span>{dateLabel(item.startsAt)}</span><p><b className="present">{item.present} present</b><b className="late">{item.late} late</b><b className="absent">{item.absent} absent</b></p><i>{item.attendanceRate ?? 0}%</i></div>)}{!data.sessions.length ? <p className="admin-empty">Completed sessions will appear here.</p> : null}</article></div><div className="panel data-panel report-student-table"><div className="live-roster-title"><div><span className="eyebrow">STUDENT-WISE REPORT</span><h3>{data.selectedClass.subjectName}</h3></div><span>{data.students.length} students</span></div><div className="report-student-row head"><span>Student</span><span>Present</span><span>Late</span><span>Absent</span><span>Sessions</span><span>Attendance</span><span>Standing</span></div>{data.students.map((student, index) => <div className="report-student-row" key={student.userId}><span className="student-cell"><i className={`student-avatar a${index % 5}`}>{personInitials(student.displayName)}</i><p><b>{student.displayName}</b><small>{student.userId}</small></p></span><span>{student.present}</span><span>{student.late}</span><span>{student.absent}</span><span>{student.attended}/{student.totalSessions}</span><span><b>{student.attendanceRate === null ? "—" : `${student.attendanceRate}%`}</b></span><span><i className={`status-dot ${student.attendanceRate === null || student.attendanceRate >= 75 ? "good" : "watch"}`} />{student.attendanceRate === null ? "No data" : student.attendanceRate >= 75 ? "On track" : "Attention"}</span></div>)}{!data.students.length ? <EmptyModule icon="♙" title="No student report rows" detail="Enrol students before completing attendance sessions." /> : null}</div></>}
+    {exportError ? <div className="module-error">! {exportError}</div> : null}
+    {!data.selectedClass ? <EmptyModule icon="↗" title="No classes to report" detail="Create a class, enrol students, and complete a QR attendance session." /> : <><div className="date-export-panel panel"><div><span className="eyebrow">DAILY ATTENDANCE</span><h3>Download by date</h3><p>Select a calendar date to export all completed sessions from that day.</p></div><label>Attendance date<input type="date" aria-label="Attendance report date" min={availableReportDates[0]} max={availableReportDates.at(-1)} value={selectedReportDate} onChange={(event) => { setSelectedReportDate(event.target.value); setExportError(""); }} disabled={!availableReportDates.length || exporting} /></label><button className="button primary" onClick={() => void exportSelectedDate()} disabled={!selectedDateSessions.length || exporting}>{exporting ? "Building workbook…" : "Download selected date ↓"}</button><small>{selectedReportDate ? selectedDateSessions.length ? `${selectedDateSessions.length} completed session${selectedDateSessions.length === 1 ? "" : "s"} on this date` : "No completed sessions on this date" : "Complete an attendance session to enable date export"}</small></div><div className="report-summary-grid faculty"><article><span>✓</span><p><b>{data.summary.averageAttendance === null ? "—" : `${data.summary.averageAttendance}%`}</b><small>Class average</small></p></article><article><span>♙</span><p><b>{data.summary.totalStudents}</b><small>Enrolled students</small></p></article><article><span>◷</span><p><b>{data.summary.totalSessions}</b><small>Completed sessions</small></p></article><article><span>▣</span><p><b>{data.selectedClass.subjectCode}</b><small>Section {data.selectedClass.section}</small></p></article></div><div className="report-dashboard-grid"><article className="panel report-trend-card"><div className="live-roster-title"><div><span className="eyebrow">RECENT SESSIONS</span><h3>Attendance trend</h3></div></div><div className="real-bar-chart">{data.sessions.slice(0, 8).reverse().map((item) => <div key={item.id}><span>{item.attendanceRate ?? 0}%</span><i><b style={{ height: `${item.attendanceRate ?? 0}%` }} /></i><small>{dateLabel(item.startsAt, false).replace(/\s\d{4}/, "")}</small></div>)}{!data.sessions.length ? <p>No completed sessions yet.</p> : null}</div></article><article className="panel session-breakdown"><div className="live-roster-title"><div><span className="eyebrow">LAST 8 SESSIONS</span><h3>Session breakdown</h3></div></div>{data.sessions.slice(0, 8).map((item) => <div key={item.id}><span>{dateLabel(item.startsAt)}</span><p><b className="present">{item.present} present</b><b className="late">{item.late} late</b><b className="absent">{item.absent} absent</b></p><i>{item.attendanceRate ?? 0}%</i></div>)}{!data.sessions.length ? <p className="admin-empty">Completed sessions will appear here.</p> : null}</article></div><div className="panel data-panel report-student-table"><div className="live-roster-title"><div><span className="eyebrow">STUDENT-WISE REPORT</span><h3>{data.selectedClass.subjectName}</h3></div><span>{data.students.length} students</span></div><div className="report-student-row head"><span>Student</span><span>Present</span><span>Late</span><span>Absent</span><span>Sessions</span><span>Attendance</span><span>Standing</span></div>{data.students.map((student, index) => <div className="report-student-row" key={student.userId}><span className="student-cell"><i className={`student-avatar a${index % 5}`}>{personInitials(student.displayName)}</i><p><b>{student.displayName}</b><small>{student.userId}</small></p></span><span>{student.present}</span><span>{student.late}</span><span>{student.absent}</span><span>{student.attended}/{student.totalSessions}</span><span><b>{student.attendanceRate === null ? "—" : `${student.attendanceRate}%`}</b></span><span><i className={`status-dot ${student.attendanceRate === null || student.attendanceRate >= 75 ? "good" : "watch"}`} />{student.attendanceRate === null ? "No data" : student.attendanceRate >= 75 ? "On track" : "Attention"}</span></div>)}{!data.students.length ? <EmptyModule icon="♙" title="No student report rows" detail="Enrol students before completing attendance sessions." /> : null}</div></>}
   </section>;
 }

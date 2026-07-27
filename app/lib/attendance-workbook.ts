@@ -23,6 +23,32 @@ export type AttendanceWorkbookData = {
   attendance: Array<{ sessionId: number; userId: string; status: "present" | "late" | "absent" }>;
 };
 
+export function selectAttendanceSessions(data: AttendanceWorkbookData, sessionIds: number[]): AttendanceWorkbookData {
+  const selectedIds = new Set(sessionIds);
+  const sessions = data.sessions.filter((session) => selectedIds.has(session.id));
+  const attendance = data.attendance.filter((entry) => selectedIds.has(entry.sessionId));
+  const statusesByStudent = new Map<string, Array<"present" | "late" | "absent">>();
+  for (const entry of attendance) {
+    statusesByStudent.set(entry.userId, [...(statusesByStudent.get(entry.userId) ?? []), entry.status]);
+  }
+  const totalSessions = sessions.length;
+  const students = data.students.map((student) => {
+    const statuses = statusesByStudent.get(student.userId) ?? [];
+    const present = statuses.filter((status) => status === "present").length;
+    const late = statuses.filter((status) => status === "late").length;
+    const absent = statuses.filter((status) => status === "absent").length;
+    return {
+      ...student,
+      present,
+      late,
+      absent,
+      totalSessions,
+      attendanceRate: totalSessions ? Math.round(((present + late) / totalSessions) * 100) : null,
+    };
+  });
+  return { ...data, students, sessions, attendance };
+}
+
 function parseUtcDate(value: string) {
   return new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
 }

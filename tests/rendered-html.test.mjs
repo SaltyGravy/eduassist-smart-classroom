@@ -80,6 +80,10 @@ test("exports styled department-section workbooks and enables manual codes only 
   assert.match(workbook, /FFDCFCE7/);
   assert.match(modules, /Export Excel/);
   assert.match(modules, /Generate manual code/);
+  assert.match(modules, /Download this attendance/);
+  assert.match(modules, /type="date"/);
+  assert.match(modules, /Download selected date/);
+  assert.match(workbook, /selectAttendanceSessions/);
   assert.match(service, /manual_code_enabled INTEGER NOT NULL DEFAULT 0/);
   assert.match(service, /manual_code_enabled = 1/);
   assert.match(service, /s\.manual_code_enabled = 1/);
